@@ -1,0 +1,202 @@
+%%% Hordad local configuration
+
+%% Whether to use SSL/TLS connection between nodes
+{{hordad, ssl}, false}.
+
+%% Node's certificate file
+{{hordad_ssl, node_certificate}, "hordad-node.crt"}.
+
+%% Node's private key
+{{hordad_ssl, node_key}, "hordad-node.key"}.
+
+%% CA certificate file
+{{hordad_ssl, ca_certificate}, "root-ca.crt"}.
+
+%% Text log filename
+{{hordad_log, text_log_file}, "hordad_text.log"}.
+
+%% Binary log filename
+{{hordad_log, bin_log_file}, "hordad_bin.log"}.
+
+%% Log handlers.
+{{hordad_log, handlers}, [hordad_log_text_h]}.
+
+%% Logging level. List of error, warning, info or all
+{{hordad_log, levels}, all}.
+
+%% Tier 2 applications to start
+{{hordad_tier2, applications},
+ [hordad_rooms,
+  hordad_registrar
+ ]}.
+
+%% Tier 3 applications to start
+{{hordad_tier3, applications},
+ [hordad_gk,
+%  hordad_gts,
+  hordad_aes_agent,
+  hordad_aes_poller
+%  hordad_aes_ag
+ ]}.
+
+%% Rooms manager database filename
+{{hordad_rooms, db}, "hordad_rooms.db"}.
+
+%% Rooms to create
+{{hordad_rooms, rooms}, [sys, lcf]}.
+
+%% Registrar database filename
+{{hordad_registrar, db}, "hordad_registrar.db"}.
+
+%% GateKeeper ------------------------------------------
+
+%% Ip address to bind gatekeeper
+%% If equals to all - will bind to all available interfaces
+{{hordad_gk, bind_ip}, all}.
+
+%% GateKeeper port
+{{hordad_gk, bind_port}, 6699}.
+
+%% DHT ------------------------------------------
+
+{{hordad_dht, b}, 2}.
+{{hordad_dht, el}, 16}.
+
+%% DHT noe IP address
+{{hordad_dht, node_ip}, {192, 168, 100, 39}}.
+
+%% DHT metadata database filename
+{{hordad_dht, meta_db}, "hordad_dht_meta.db"}.
+
+%% DHT routing database filename
+{{hordad_dht, route_db}, "hordad_dht_route.db"}.
+
+%% DHT leaf set database filename
+{{hordad_dht, leaf_set_db}, "hordad_dht_leaf_set.db"}.
+
+%% DHT neighboor set database filename
+{{hordad_dht, nb_set_db}, "hordad_dht_nb_set.db"}.
+
+%% DHT storage database filename
+{{hordad_dht, storage_db}, "hordad_dht_storage.db"}.
+
+%% An existing DHT node's IP or undefined
+{{hordad_dht, entry_point}, undefined}.
+
+%% AES ------------------------------------------
+
+%% Maximum number of parallel connections node can handle
+{{hordad_aes_agent, lar_max_con}, 1000}.
+
+%% File to read connections stats from
+{{hordad_aes_agent, ipvs_conn_file}, "/tmp/ipvs"}.
+
+%% AES poller - nodes to poll
+{{hordad_aes_poller, nodes},
+ [
+  {10, 0, 0, 2},	
+  {10, 1, 0, 2},	
+  {10, 2, 0, 2},	
+  {62, 149, 5, 134},
+  {192, 168, 100, 39}
+ ]}.
+
+%% AES poll timeout (in miliseconds)
+{{hordad_aes_poller, poll_timeout}, 2000}.
+
+%% AES aggregator database filename
+{{hordad_aes_ag, db}, "hordad_aes_ag.db"}.
+
+%% AES aggregator' poller list
+{{hordad_aes_ag, pollers},
+ [
+  {192, 168, 100, 39}
+ ]}.
+
+%% AES aggregator timeout (in miliseconds)
+{{hordad_aes_ag, session_timeout}, 30000}.
+
+%% How often should aggregator run polling procedure (in ms).
+{{hordad_aes_ag, cycle_period}, 60000}.
+
+%% GTS database filename
+{{hordad_gts, db}, "hordad_gts.db"}.
+
+%% GTS external DB driver to use: mysql
+{{hordad_gts, driver}, mysql}.
+
+%% GTS driver configuration
+{{hordad_gts, driver_config},
+ [{host, "localhost"},
+  {port, 3306},
+  {user, "root"},
+  {password, "root"},
+  {db, "hordad_gts_wm"}
+ ]}.
+
+%% Default LAR value. Will be used if not explicitly defined in tp
+%% configuration
+{{hordad_gts, default_lar}, 100}.
+
+%% TP definitions
+{{hordad_gts, tp},
+ [
+  % Volia TP
+  {volia, [
+           {ips, [
+                  {10, 0, 0, 2}
+                 ]},
+
+           {lar, [
+                  {{10, 0, 0, 2}, 70}
+                 ]},
+
+           {domains, [
+                      "content.wantmore.ru"
+                     ]},
+
+           {fallback, [vega, beeline, default]}
+          ]},
+
+  % Beeline TP
+  {beeline, [
+             {ips, [
+                    {10, 1, 0, 2},
+                    {62, 149, 5, 134}
+                   ]},
+
+             {lar, [
+                    {{10, 1, 0, 2}, 80},
+                    {{62, 149, 5, 134}, 90}
+                   ]},
+
+             {domains, [
+                        "content.wantmore.ru"
+                       ]},
+             {fallback, [vega, volia, default]}
+            ]},
+
+  % Vega TP
+  {vega, [
+          {ips, [
+                  {10, 2, 0, 2}
+                ]},
+
+          {lar, [
+                 {{10, 2, 0, 2}, 50}
+                ]},
+
+          {domains, [
+                     "content.wantmore.ru"
+                    ]},
+          {fallback, [default]}
+         ]},
+
+  % Default TP
+  {default, [
+             {ips, [
+                    {192, 168, 100, 39}
+                   ]}
+            ]
+  }
+ ]}.

@@ -1,0 +1,252 @@
+#!/usr/bin/env python
+# -------------------------------------------------------------------
+# File    : hctl
+# Author  : Max E. Kuznecov <mek@mek.uz.ua>
+# Description: Hordad control tool
+#
+# Created : 2010-03-15 by Max E. Kuznecov <mek@mek.uz.ua>
+# @copyright 2009-2010 Server Labs
+# -------------------------------------------------------------------
+
+import sys
+import os
+import socket
+import string
+import random
+import getopt
+import shutil
+
+MAIN_NODE = "hordad_sys"
+DEFAULT_USER = "hordad"
+
+OPENSSL_CONF = "openssl.cnf"
+KEY_BITS = 2048
+CERT_DAYS = 10000
+
+OPENSSL_CNF_TEMPLATE = """\
+[ ca ]
+default_ca = customca
+
+[ customca ]
+dir = /usr/hordad/%(ca)s
+certificate = $dir/certs/ca.crt
+database = $dir/index
+new_certs_dir = $dir/certs
+private_key = $dir/private/ca.key
+serial = $dir/serial
+default_crl_days = 7
+default_days = 10000
+default_md = sha1
+policy = customca_policy
+x509_extensions = certificate_extensions
+
+[ customca_policy ]
+commonName = supplied
+stateOrProvinceName = supplied
+countryName = supplied
+emailAddress = supplied
+organizationName = supplied
+organizationalUnitName = optional
+
+[ certificate_extensions ]
+basicConstraints = CA:false
+
+[ req ]
+default_bits = 2048
+default_keyfile = /usr/hordad/%(ca)s/private/ca.key
+default_md = sha1
+#prompt = no
+distinguished_name = root_ca_distinguished_name
+x509_extensions = root_ca_extensions
+
+[ root_ca_distinguished_name ]
+countryName = Country Name
+countryName_default = UA
+
+stateOrProvinceName = State or Province
+stateOrProvinceName_default = Kiev
+
+commonName = Common Name
+commonName_default = Server Labs
+
+emailAddress = Email address
+emailAddress_default = ca@server-labs.com
+
+organizationName = Organization name
+organizationName_default = Root Certification Authority
+
+[ root_ca_extensions ]
+basicConstraints = CA:true
+"""
+
+# Actions --------------
+
+def action_help(_):
+    "Usage help"
+    
+    print "hctl - hordad control tool\n"\
+          "Usage: hctl [-u user] action\n\n"\
+          "Available actions: \n"
+
+    for act in dir(sys.modules[__name__]):
+        if act.startswith("action_"):
+            print("\t%s - %s" % (act.replace("action_", ""),
+                                 getattr(sys.modules[__name__], act).__doc__))
+
+    print ""
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def action_shell(user):
+    "Connect to running hordad system"
+
+    sname = gen_sname()
+    hostname = socket.gethostname().split(".")[0]
+
+    cmd = "erl -sname %s -remsh %s@%s" % (sname, MAIN_NODE, hostname)
+
+    run_as(user, cmd)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def action_log_rotate(user):
+    "Re-open logs"
+
+    erl_call(user, "hordad_log", "logrotate")
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def action_new_ca(user, ca):
+    "Create new CA. (ca_name)"
+
+    cert = get_ca_cert(ca)
+
+    # 1. Create infrastructure
+    os.mkdir(ca)
+    os.mkdir("%s/certs" % ca)
+    os.mkdir("%s/private" % ca, 0700)
+
+    serial = open("%s/serial" % ca, "w")
+    serial.write("01\n")
+    serial.close()
+
+    index = open("%s/index" % ca, "w")
+    index.close()
+
+    cnf = open("%s/openssl.cnf" % ca, "w")
+    cnf.write(OPENSSL_CNF_TEMPLATE % locals())
+    cnf.close()
+
+    # 2. Create and self-sign CA cert
+    os.system("openssl req -new -x509 -newkey rsa:%d "\
+              "-out %s -config %s/%s -outform PEM" % (KEY_BITS,
+                                                      cert, ca, OPENSSL_CONF))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def action_new_node_cert(user, ca, ip):
+    "Create certificate for node. (ca-name node-ip)"
+
+    key = get_node_key(ip)
+    csr = get_node_csr(ip)
+    cert = get_node_cert(ip)
+    
+    cakey = get_ca_key(ca)
+    cacert = get_ca_cert(ca)
+
+    # 1. Create node key
+    os.system("openssl genrsa -des3 -out %s %d" % (key, KEY_BITS))
+
+    # 2. Remove passphrase from key
+    os.system("openssl rsa -in %s -out %s.tmp" % (key, key))
+    shutil.move("%s.tmp" % key, key)
+
+    # 2. Create CSR
+    os.system("openssl req -new -key %s -out %s" % (key, csr))
+
+    # 3. Sign cert
+    os.system("openssl ca -in %s -config %s -out %s" %
+              (csr, "%s/openssl.cnf" % ca, cert))
+
+    # 4. Remove csr file
+    os.unlink(csr)
+    
+# Internal stuff
+#================================================
+
+def gen_sname():
+    "Generate sname to avoid clashes"
+
+    domain = string.uppercase + string.lowercase + string.digits
+    
+    return "hctl_%s" % "".join(random.sample(domain, 10))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def get_ca_key(ca):
+    return "%(ca)s/private/ca.key" % locals()
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def get_ca_cert(ca):
+    return "%(ca)s/certs/ca.crt" % locals()
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def get_node_key(ip):
+    return "%s-hordad.key" % ip
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def get_node_csr(ip):
+    return "%s-hordad.csr" % ip
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def get_node_cert(ip):
+    return "%s-hordad.crt" % ip
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def erl_call(user, module, function):
+    run_as(user, "erl_call -s -n %s -a '%s %s'" %
+           (MAIN_NODE, module, function))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def run_as(user, cmd):
+    "Run cmd as specified user"
+
+    os.system("su %s -l -c \"%s\"" % (user, cmd))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+if __name__ == "__main__":
+    cmdopts = "u:"
+
+    if len(sys.argv) == 1:
+        action_help(None)
+        raise SystemExit()
+
+    user = DEFAULT_USER
+
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], cmdopts)
+    except getopt.GetoptError, e:
+        action_help(None)
+        raise SystemExit()
+
+    for _o, _a in opts:
+        if _o == "-u":
+            user = _a
+        else:
+            action_help(None)
+            raise SystemExit()
+        
+    action_str = "action_%s" % args[0]
+
+    getattr(sys.modules[__name__], action_str, action_help)(user, *args[1:])
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
