@@ -13,19 +13,19 @@
 
 %% API
 -export([start_link/0,
-         get/2
+         get_async/2,
+         get_sync/1,
+         deliver/3
         ]).
+
+-export([service_handler/2, route/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-define(SERVICE_TAG, "dht").
 -define(SERVER, ?MODULE).
-
--record(entry, {
-          ref,
-          pid
-         }).
 
 %%====================================================================
 %% API
@@ -40,10 +40,46 @@ start_link() ->
 %% @doc Get key value. The function is asynchronous,
 %%      the Pid argument will be sent a message in form:
 %%      {get_result, Key, Value} or {error, Reason}
--spec(get(string(), pid()) -> ok).
+-spec(get_async(any(), pid()) -> ok).
 
-get(Key, Pid) ->
+get_async(Key, Pid) ->
     gen_server:call(?SERVER, {get, Key, Pid}).
+
+%% @doc Synchronous version of get
+-spec(get_sync(any()) -> {ok, any()} | {error, any()}).
+
+get_sync(Key) ->
+    Self = self(),
+
+    F = fun() ->
+                get_async(Key, Self)
+        end,
+
+    spawn(F),
+    
+    Timeout = hordad_lcf:get_var({hordad_dht, get_timeout}),
+
+    receive
+        {get_result, Key, Value} ->
+            {ok, Value};
+        {error, _}=E ->
+            E
+    after
+        Timeout ->
+            {error, timeout}
+    end.
+
+%% @doc Deliver a message to this very node
+deliver(Msg, Id, Ref) ->
+    gen_server:call(?SERVER, {deliver, Msg, Id, Ref}).
+
+%% ---------------------------------------------
+
+%% @doc Handle incoming service requests
+-spec(service_handler(any(), port()) -> ok).
+
+service_handler({route, Msg, Id, Ref}, _Socket) when is_reference(Ref) ->
+    route(Msg, Id, Ref).
 
 %%====================================================================
 %% gen_server callbacks
@@ -57,6 +93,10 @@ get(Key, Pid) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
+    hordad_registrar:register(?SERVICE_TAG,
+                              {hordad_service, generic_service_handler,
+                               [?MODULE, service_handler, []]}),
+
     % Node 
     NodeId = case hordad_dht_meta:lookup(node_id) of
                  [Id] ->
@@ -72,6 +112,14 @@ init([]) ->
 
     hordad_lcf:set_var({hordad_dht, node_id}, NodeId),
 
+    % Check if entry point supplied
+    ok = case hordad_lcf:get_var({hordad_dht, entry_point}, undefined) of
+             undefined ->
+                 ok;
+             EntryPoint ->
+                 join_dht(EntryPoint)
+         end,
+
     {ok, dict:new()}.
 
 %%--------------------------------------------------------------------
@@ -84,8 +132,17 @@ init([]) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 
-handle_call(_Msg, _From, State) ->
-    {noreply, State}.
+handle_call({get, Key, Pid}, _From, State) ->
+    % 1. Store request in dict
+    Ref = make_ref(),
+    NewState = dict:store(Ref, Pid, State),
+
+    % 2. Spawn routing proc
+    spawn(?MODULE, route, [{get, Key}, Key, Ref]),
+    
+    {reply, ok, NewState};
+handle_call({deliver, Msg, Id, Ref}, _From, State) ->
+    do_deliver(Msg, Id, Ref, State).
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -125,3 +182,39 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
+
+%% @doc Select next node in routing chain
+route(Msg, Id, Ref) ->
+    % First check the leaf set
+    case hordad_dht_leaf_set:has_node(Id) of
+        % The destination node is the current one. Deliver to itself
+        self ->
+            deliver(Msg, Id, Ref);
+        % We've got Id in our leaf set. Forward msg to it
+        {has, NodeId} ->
+            forward(Msg, Id, Ref, NodeId);
+        % No node in leaf set, go on with routing
+        false ->
+            case hordad_dht_route_table:get_node(Id) of
+                {ok, NodeId} ->
+                    forward(Msg, Id, Ref, NodeId);
+                undefined ->
+                    rare_case
+            end
+    end.
+
+%% @doc Join existing DHT
+-spec(join_dht(IP :: tuple()) -> ok).
+
+join_dht(EntryPoint) ->
+    pass.
+
+%% @doc Forward message to another node
+forward(Msg, Id, Ref, NodeId) ->
+    pass.
+
+%% @doc Workhouse for deliver/3
+do_deliver({get, Key}, Id, Ref, Dict) ->
+    Val = hordad_storage:lookup(Key, undefined),
+
+    Dict.

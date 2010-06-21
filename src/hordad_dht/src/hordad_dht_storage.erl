@@ -34,7 +34,7 @@ start_link() ->
 -spec(lookup(any()) -> any()).
 
 lookup(Key) ->
-    lookup(Key, default).
+    lookup(Key, undefined).
 
 %% @doc Lookup key value providing default one
 -spec(lookup(any(), any()) -> any()).
