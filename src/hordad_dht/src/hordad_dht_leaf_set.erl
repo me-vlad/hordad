@@ -9,6 +9,8 @@
 -module(hordad_dht_leaf_set).
 -behaviour(gen_server).
 
+-include("hordad_dht.hrl").
+
 %% API
 -export([start_link/0, has_node/1]).
 
@@ -18,11 +20,6 @@
 
 -define(TAB_NAME, hordad_dht_leaf_set).
 -define(SERVER, ?MODULE).
-
--record(entry, {
-          id,
-          ip
-         }).
 
 -type(id() :: integer()).
 
@@ -37,7 +34,7 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %% @doc Check if provided node id falls into our leaf set
--spec(has_node(id()) -> self | false | {has, id()}).
+-spec(has_node(id()) -> self | false | {has, #leaf_set_entry{}}).
 
 has_node(NodeID) ->
     gen_server:call(?SERVER, {has_node, NodeID}).
@@ -62,7 +59,8 @@ init([]) ->
               {ok, T} ->
                   T;
               {error, _} ->
-                  ets:new(?TAB_NAME, [ordered_set, {keypos, #entry.id}])
+                  ets:new(?TAB_NAME, [ordered_set,
+                                      {keypos, #leaf_set_entry.id}])
           end,
     
     {ok, Tab}.
@@ -129,20 +127,23 @@ do_has_node(Id, Tab) ->
         '$end_of_table' ->
             false;
         _ ->
+            [FirstEntry | _] = ets:lookup(Tab, First),
+
             if
                 Id < First orelse Id > Last ->
                     false;
                 % Get closest node id
                 true ->
-                    Next = ets:foldl(fun(#entry{id=KeyId}, Acc) when
-                                        Id - KeyId < Acc ->
-                                             KeyId;
-                                        (_, Acc) ->
-                                             Acc
-                                     end, First, Tab),
+                    Next = ets:foldl(
+                             fun(#leaf_set_entry{id=KeyId}=Entry, Acc) when
+                                Id - KeyId < Acc ->
+                                     Entry;
+                                (_, Acc) ->
+                                     Acc
+                             end, FirstEntry, Tab),
                     
                     if
-                        SelfId < Next ->
+                        SelfId < Next#leaf_set_entry.id ->
                             self;
                         true ->
                             {has, Next}

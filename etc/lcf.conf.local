@@ -62,7 +62,7 @@
 {{hordad_dht, b}, 2}.
 {{hordad_dht, el}, 16}.
 
-%% DHT noe IP address
+%% DHT node IP address
 {{hordad_dht, node_ip}, {192, 168, 100, 39}}.
 
 %% DHT metadata database filename

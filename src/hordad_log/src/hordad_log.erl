@@ -18,13 +18,14 @@
          error/3,
          warning/3,
          info/3,
+         debug/3,
          logrotate/0
         ]).
 
 -define(SERVER, ?MODULE).
 
 %% @doc Log a message
--type(log_level() :: error | warning | info).
+-type(log_level() :: error | warning | info | debug).
 -spec(log(From :: atom(), log_level(), Format :: string(), Data :: [any()])
       -> ok).
 
@@ -53,6 +54,10 @@ warning(From, Format, Data) ->
 
 %% @doc Log info message. Shorthand for log(From, info, Format, Data).
 info(From, Format, Data) ->
+    log(From, info, Format, Data).
+
+%% @doc Log debug message. Shorthand for log(From, debug, Format, Data).
+debug(From, Format, Data) ->
     log(From, info, Format, Data).
 
 %% @doc Command all hanlders to re-open logs

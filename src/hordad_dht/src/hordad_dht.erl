@@ -11,14 +11,15 @@
 
 -behaviour(gen_server).
 
+-include("hordad_dht.hrl").
+
 %% API
 -export([start_link/0,
          get_async/2,
-         get_sync/1,
-         deliver/3
+         get_sync/1
         ]).
 
--export([service_handler/2, route/3]).
+-export([service_handler/2, route/4, deliver/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -70,16 +71,18 @@ get_sync(Key) ->
     end.
 
 %% @doc Deliver a message to this very node
-deliver(Msg, Id, Ref) ->
-    gen_server:call(?SERVER, {deliver, Msg, Id, Ref}).
+deliver(Msg, Key, Ref, IP) ->
+    gen_server:call(?SERVER, {deliver, Msg, Key, Ref, IP}).
 
 %% ---------------------------------------------
 
 %% @doc Handle incoming service requests
 -spec(service_handler(any(), port()) -> ok).
 
-service_handler({route, Msg, Id, Ref}, _Socket) when is_reference(Ref) ->
-    route(Msg, Id, Ref).
+service_handler({route, Msg, Key, Ref, IP}, _Socket) ->
+    route(Msg, Key, Ref, IP);
+service_handler({get_result, _Key, _Val, _Ref}=Msg, _Socket) ->
+    gen_server:cast(?SERVER, {complete_request, Msg}).
 
 %%====================================================================
 %% gen_server callbacks
@@ -133,16 +136,9 @@ init([]) ->
 %%--------------------------------------------------------------------
 
 handle_call({get, Key, Pid}, _From, State) ->
-    % 1. Store request in dict
-    Ref = make_ref(),
-    NewState = dict:store(Ref, Pid, State),
-
-    % 2. Spawn routing proc
-    spawn(?MODULE, route, [{get, Key}, Key, Ref]),
-    
-    {reply, ok, NewState};
-handle_call({deliver, Msg, Id, Ref}, _From, State) ->
-    do_deliver(Msg, Id, Ref, State).
+    {reply, ok, do_init_request(get, Key, Pid, State)};
+handle_call({deliver, Msg, Key, Ref, IP}, _From, State) ->
+    {reply, do_deliver(Msg, Key, Ref, IP), State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -150,8 +146,11 @@ handle_call({deliver, Msg, Id, Ref}, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast(_Msg, State) ->
-    {noreply, State}.
+handle_cast({complete_request, Msg}, State) ->
+    %% 1. Check if there's a pending request for given Ref
+    hordad_log:debug(?MODULE, "Completing request: ~9999p", [Msg]),
+    
+    {noreply, do_complete_request(Msg, State)}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_info(Info, State) -> {noreply, State} |
@@ -184,20 +183,31 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 
 %% @doc Select next node in routing chain
-route(Msg, Id, Ref) ->
+route(Msg, Key, Ref, IP) ->
+    hordad_log:info(?MODULE, "~p: routing message: ~9999p from ~p",
+                    [Ref, Msg, IP]),
+
     % First check the leaf set
-    case hordad_dht_leaf_set:has_node(Id) of
+    case hordad_dht_leaf_set:has_node(Key) of
         % The destination node is the current one. Deliver to itself
         self ->
-            deliver(Msg, Id, Ref);
+            hordad_log:info(?MODULE, "~p: delivering ~p to self", [Ref]),
+
+            deliver(Msg, Key, Ref, IP);
         % We've got Id in our leaf set. Forward msg to it
-        {has, NodeId} ->
-            forward(Msg, Id, Ref, NodeId);
+        {has, Next} ->
+            hordad_log:info(?MODULE, "~p: forwarding ~p to ~p (leaf)",
+                            [Ref, Next#leaf_set_entry.ip]),
+
+            forward(Msg, Key, Ref, Next, IP);
         % No node in leaf set, go on with routing
         false ->
-            case hordad_dht_route_table:get_node(Id) of
-                {ok, NodeId} ->
-                    forward(Msg, Id, Ref, NodeId);
+            case hordad_dht_route_table:get_node(Key) of
+                {ok, Next} ->
+                    hordad_log:info(?MODULE, "~p: forwarding ~p to ~p (route)",
+                                    [Ref, Next#leaf_set_entry.ip]),
+
+                    forward(Msg, Key, Ref, Next, IP);
                 undefined ->
                     rare_case
             end
@@ -207,14 +217,48 @@ route(Msg, Id, Ref) ->
 -spec(join_dht(IP :: tuple()) -> ok).
 
 join_dht(EntryPoint) ->
-    pass.
+    ok.
 
 %% @doc Forward message to another node
-forward(Msg, Id, Ref, NodeId) ->
-    pass.
+forward(Msg, Key, Ref, #leaf_set_entry{ip=NextIP}, IP) ->
+    ok = hordad_lib_net:gen_session(?MODULE, NextIP,
+                                    ?SERVICE_TAG,
+                                    {route, Msg, Key, Ref, IP}, 20),
 
-%% @doc Workhouse for deliver/3
-do_deliver({get, Key}, Id, Ref, Dict) ->
-    Val = hordad_storage:lookup(Key, undefined),
+    ok.
 
-    Dict.
+%% @doc Workhouse for deliver/4
+do_deliver(get, Key, Ref, IP) ->
+    Val = hordad_dht_storage:lookup(Key, undefined),
+
+    ok = hordad_lib_net:gen_session(?MODULE, IP,
+                                    ?SERVICE_TAG,
+                                    {get_result, Key, Val, Ref}, 20),
+    ok.
+
+%% @doc Init new request
+do_init_request(Msg, Key, Pid, State) ->
+    % 1. Store request in dict
+    Ref = make_ref(),
+    IP = hordad_lcf:get_var({hordad_dht, node_ip}),
+
+    % 2. Spawn routing proc
+    spawn(?MODULE, route, [Msg, Key, Ref, IP]),
+
+    dict:store(Ref, Pid, State).
+
+%% @doc Perform request completion
+-spec(do_complete_request(any(), dict()) -> dict()).
+
+do_complete_request({get_result, Key, Val, Ref}=Msg, Dict) ->
+    case dict:find(Ref, Dict) of
+        {ok, Pid} ->
+            Pid ! {get_result, Key, Val},
+
+            dict:erase(Ref, Dict);
+        erorr ->
+            hordad_log:warning(?MODULE,
+                               "Unable to complete request - "
+                               "not in queue: ~9999p.", [Msg]),
+            Dict
+    end.

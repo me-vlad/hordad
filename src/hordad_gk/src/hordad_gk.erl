@@ -189,12 +189,7 @@ acceptor(Listener) ->
                      end
              end,
 
-    {ok, {IP, Port}} = case SSLMode of
-                           true ->
-                               ssl:peername(Socket);
-                           false ->
-                               inet:peername(Socket)
-                       end,
+    {ok, {IP, Port}} = hordad_lib_net:peername(Socket),
 
     hordad_log:info(?MODULE, "Connection accepted from ~p:~p", [IP, Port]),
 

@@ -30,7 +30,8 @@
          ip2str/1,
          str2ip/1,
          is_ssl_mode/0,
-         get_ssl_opts/0
+         get_ssl_opts/0,
+         peername/1
         ]).
 
 -define(HEADER_SIZE, 32).
@@ -266,3 +267,16 @@ get_ssl_opts() ->
      {keyfile, NodeKey},
      {cacertfile, CACert}
     ].
+
+%% @doc Get IP, port out of client socket
+-spec(peername(port()) -> {ok, {ip_address(), integer()}} | {error, atom()}).
+
+peername(Socket) ->
+    SSLMode = is_ssl_mode(),
+
+    case SSLMode of
+        true ->
+            ssl:peername(Socket);
+        false ->
+            inet:peername(Socket)
+    end.
