@@ -1,0 +1,13 @@
+Client:
+-- Request --
+1) hordad_dht:get_async(Key, Pid).
+2) gen_server:call(hordad_dht, {get, Key, Pid}).
+3) do_init_request(get, Key, Pid, Dict).
+4) Store new request ID
+5) spawn: hordad_dht:route(Msg=get, Key, Ref, IP=hordad_dht_ip).
+
+-- Response --
+1) service: {get_result, Key, Val, Ref}
+2) gen_server:call(hordad_dht, {complete_request, Msg}).
+3) Find request ID in dict-state
+4) Pid ! {get_result, Key, Val}
