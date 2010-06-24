@@ -19,7 +19,10 @@
          get_sync/1
         ]).
 
--export([service_handler/2, route/4, deliver/4]).
+-export([service_handler/2,
+         route/4,
+         request_watcher/1
+        ]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -58,21 +61,20 @@ get_sync(Key) ->
 
     spawn(F),
     
-    Timeout = hordad_lcf:get_var({hordad_dht, get_timeout}),
-
     receive
         {get_result, Key, Value} ->
             {ok, Value};
         {error, _}=E ->
             E
-    after
-        Timeout ->
-            {error, timeout}
     end.
 
 %% @doc Deliver a message to this very node
 deliver(Msg, Key, Ref, IP) ->
     gen_server:call(?SERVER, {deliver, Msg, Key, Ref, IP}).
+
+%% @doc Perform request completion
+complete_request(Msg) ->
+    gen_server:call(?SERVER, {complete_request, Msg}).
 
 %% ---------------------------------------------
 
@@ -82,7 +84,7 @@ deliver(Msg, Key, Ref, IP) ->
 service_handler({route, Msg, Key, Ref, IP}, _Socket) ->
     route(Msg, Key, Ref, IP);
 service_handler({get_result, _Key, _Val, _Ref}=Msg, _Socket) ->
-    gen_server:cast(?SERVER, {complete_request, Msg}).
+    complete_request(Msg).
 
 %%====================================================================
 %% gen_server callbacks
@@ -138,7 +140,9 @@ init([]) ->
 handle_call({get, Key, Pid}, _From, State) ->
     {reply, ok, do_init_request(get, Key, Pid, State)};
 handle_call({deliver, Msg, Key, Ref, IP}, _From, State) ->
-    {reply, do_deliver(Msg, Key, Ref, IP), State}.
+    {reply, do_deliver(Msg, Key, Ref, IP), State};
+handle_call({complete_request, Msg}, _From, State) ->
+    {reply, ok, do_complete_request(Msg, State)}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -146,11 +150,8 @@ handle_call({deliver, Msg, Key, Ref, IP}, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({complete_request, Msg}, State) ->
-    %% 1. Check if there's a pending request for given Ref
-    hordad_log:debug(?MODULE, "Completing request: ~9999p", [Msg]),
-    
-    {noreply, do_complete_request(Msg, State)}.
+handle_cast(_, State) ->
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_info(Info, State) -> {noreply, State} |
@@ -191,12 +192,12 @@ route(Msg, Key, Ref, IP) ->
     case hordad_dht_leaf_set:has_node(Key) of
         % The destination node is the current one. Deliver to itself
         self ->
-            hordad_log:info(?MODULE, "~p: delivering ~p to self", [Ref]),
+            hordad_log:info(?MODULE, "~p: delivering to self", [Ref]),
 
             deliver(Msg, Key, Ref, IP);
         % We've got Id in our leaf set. Forward msg to it
         {has, Next} ->
-            hordad_log:info(?MODULE, "~p: forwarding ~p to ~p (leaf)",
+            hordad_log:info(?MODULE, "~p: forwarding to ~p (leaf)",
                             [Ref, Next#leaf_set_entry.ip]),
 
             forward(Msg, Key, Ref, Next, IP);
@@ -204,7 +205,7 @@ route(Msg, Key, Ref, IP) ->
         false ->
             case hordad_dht_route_table:get_node(Key) of
                 {ok, Next} ->
-                    hordad_log:info(?MODULE, "~p: forwarding ~p to ~p (route)",
+                    hordad_log:info(?MODULE, "~p: forwarding to ~p (route)",
                                     [Ref, Next#leaf_set_entry.ip]),
 
                     forward(Msg, Key, Ref, Next, IP);
@@ -245,20 +246,47 @@ do_init_request(Msg, Key, Pid, State) ->
     % 2. Spawn routing proc
     spawn(?MODULE, route, [Msg, Key, Ref, IP]),
 
-    dict:store(Ref, Pid, State).
+    % 3. Spawn watcher proc as well
+    Watcher = spawn(?MODULE, request_watcher, [Ref]),
+
+    dict:store(Ref, {Pid, Watcher}, State).
 
 %% @doc Perform request completion
 -spec(do_complete_request(any(), dict()) -> dict()).
 
-do_complete_request({get_result, Key, Val, Ref}=Msg, Dict) ->
-    case dict:find(Ref, Dict) of
-        {ok, Pid} ->
-            Pid ! {get_result, Key, Val},
+do_complete_request(Msg, Dict) ->
+    {Ref, Val} = case Msg of
+                     {get_result, Key, Value, RefOrig} ->
+                         {RefOrig, {get_result, Key, Value}};
+                     {timeout, RefOrig} ->
+                         {RefOrig, {error, timeout}}
+                 end,
 
+    %% Locate stored request
+    case dict:find(Ref, Dict) of
+        {ok, {Pid, Watcher}} ->
+            hordad_log:info(?MODULE,
+                             "~p: completing request: ~9999p", [Ref, Val]),
+
+            Watcher ! completed,
+            Pid ! Val,
             dict:erase(Ref, Dict);
         erorr ->
             hordad_log:warning(?MODULE,
                                "Unable to complete request - "
                                "not in queue: ~9999p.", [Msg]),
             Dict
+    end.
+
+%% @doc Request watcher
+request_watcher(Ref) ->
+    Timeout = hordad_lcf:get_var({hordad_dht, get_timeout}),
+
+    % Ensure request has completed
+    receive
+        completed ->
+            ok
+    after
+        Timeout ->
+            complete_request({timeout, Ref})
     end.
