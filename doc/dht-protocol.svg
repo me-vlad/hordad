@@ -108,8 +108,8 @@
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
      inkscape:zoom="0.35"
-     inkscape:cx="-372.27131"
-     inkscape:cy="520"
+     inkscape:cx="-130.98876"
+     inkscape:cy="862.85714"
      inkscape:document-units="px"
      inkscape:current-layer="layer1"
      showgrid="false"
@@ -127,7 +127,7 @@
         <dc:format>image/svg+xml</dc:format>
         <dc:type
            rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
-        <dc:title></dc:title>
+        <dc:title />
       </cc:Work>
     </rdf:RDF>
   </metadata>
@@ -172,7 +172,7 @@
          sodipodi:role="line"
          id="tspan2944"
          x="-635.34039"
-         y="-187.25362">Hordad node</tspan></text>
+         y="-187.25362">Hordad node 1</tspan></text>
     <g
        id="g2973"
        transform="translate(-34.285714,5.7142857)">
@@ -279,14 +279,14 @@
     <text
        xml:space="preserve"
        style="font-size:40px;font-style:normal;font-weight:normal;text-align:start;line-height:125%;writing-mode:lr-tb;text-anchor:start;fill:#000000;fill-opacity:1;stroke:none;font-family:Bitstream Vera Sans"
-       x="970.37384"
-       y="-203.04527"
+       x="956.08813"
+       y="-194.47385"
        id="text2917-6-3"
        sodipodi:linespacing="125%"><tspan
          sodipodi:role="line"
          id="tspan2944-4"
-         x="970.37384"
-         y="-203.04527">Hordad node</tspan></text>
+         x="956.08813"
+         y="-194.47385">Hordad node 2</tspan></text>
     <rect
        style="fill:#ffffff;fill-opacity:1;stroke:#000000;stroke-width:2.91578245;stroke-linejoin:round;stroke-miterlimit:4;stroke-opacity:1;stroke-dasharray:none;stroke-dashoffset:0"
        id="rect4604-4"
