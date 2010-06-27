@@ -83,6 +83,9 @@
 %% An existing DHT node's IP or undefined
 {{hordad_dht, entry_point}, undefined}.
 
+%% Timeout for network connections (ms)
+{{hordad_dht, net_timeout}, 5000}.
+
 %% AES ------------------------------------------
 
 %% Maximum number of parallel connections node can handle
@@ -152,7 +155,7 @@
                  ]},
 
            {domains, [
-                      "content.wantmore.ru"
+                      "content.xyz"
                      ]},
 
            {fallback, [vega, beeline, default]}
@@ -171,7 +174,7 @@
                    ]},
 
              {domains, [
-                        "content.wantmore.ru"
+                        "content.xyz"
                        ]},
              {fallback, [vega, volia, default]}
             ]},
@@ -187,7 +190,7 @@
                 ]},
 
           {domains, [
-                     "content.wantmore.ru"
+                     "content.xyz"
                     ]},
           {fallback, [default]}
          ]},
