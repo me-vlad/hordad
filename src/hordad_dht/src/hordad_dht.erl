@@ -19,6 +19,7 @@
          get_sync/1
         ]).
 
+%% Internal stuff
 -export([service_handler/2,
          route/4,
          request_watcher/1
@@ -31,6 +32,16 @@
 -define(SERVICE_TAG, "dht").
 -define(SERVER, ?MODULE).
 
+-define(is_callback(CB), is_pid(CB) orelse 
+                         is_function(CB) orelse
+                         (is_tuple(CB) andalso
+                          tuple_size(CB) == 3 andalso
+                          is_atom(element(1, CB)) andalso
+                          is_atom(element(2, CB)) andalso
+                          is_list(element(3, CB)))).
+
+-type(callback() :: pid() | function() | tuple()).
+
 %%====================================================================
 %% API
 %%====================================================================
@@ -42,12 +53,14 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %% @doc Get key value. The function is asynchronous,
-%%      the Pid argument will be sent a message in form:
+%%      the CB argument can be either pid() or fun() or
+%%      tuple in format {Module, Fun, Args}.
+%%      The callback will be passed and argument/sent a message in form:
 %%      {get_result, Key, Value} or {error, Reason}
--spec(get_async(any(), pid()) -> ok).
+-spec(get_async(any(), callback()) -> ok).
 
-get_async(Key, Pid) ->
-    gen_server:call(?SERVER, {get, Key, Pid}).
+get_async(Key, CB) when ?is_callback(CB) ->
+    gen_server:call(?SERVER, {get, Key, CB}).
 
 %% @doc Synchronous version of get
 -spec(get_sync(any()) -> {ok, any()} | {error, any()}).
@@ -102,20 +115,7 @@ init([]) ->
                               {hordad_service, generic_service_handler,
                                [?MODULE, service_handler, []]}),
 
-    % Node 
-    NodeId = case hordad_dht_meta:lookup(node_id) of
-                 [Id] ->
-                     Id;
-                 undefined ->
-                     % No ID yet, generate new one
-                     Id = hordad_dht_lib:gen_id(
-                            hordad_lcf:get_var({hordad_dht, node_ip})),
-                     hordad_dht_meta:insert({node_id, Id}),
-
-                     Id
-             end,
-
-    hordad_lcf:set_var({hordad_dht, node_id}, NodeId),
+    set_node_id(),
 
     % Check if entry point supplied
     ok = case hordad_lcf:get_var({hordad_dht, entry_point}, undefined) of
@@ -137,8 +137,8 @@ init([]) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 
-handle_call({get, Key, Pid}, _From, State) ->
-    {reply, ok, do_init_request(get, Key, Pid, State)};
+handle_call({get, Key, CB}, _From, State) ->
+    {reply, ok, do_init_request(get, Key, CB, State)};
 handle_call({deliver, Msg, Key, Ref, IP}, _From, State) ->
     {reply, do_deliver(Msg, Key, Ref, IP), State};
 handle_call({complete_request, Msg}, _From, State) ->
@@ -159,7 +159,8 @@ handle_cast(_, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
-handle_info(_Info, State) ->
+handle_info(Msg, State) ->
+    hordad_log:warning(?MODULE, "Unknown message received: ~9999p", [Msg]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -238,7 +239,7 @@ do_deliver(get, Key, Ref, IP) ->
     ok.
 
 %% @doc Init new request
-do_init_request(Msg, Key, Pid, State) ->
+do_init_request(Msg, Key, CB, State) ->
     % 1. Store request in dict
     Ref = make_ref(),
     IP = hordad_lcf:get_var({hordad_dht, node_ip}),
@@ -249,7 +250,7 @@ do_init_request(Msg, Key, Pid, State) ->
     % 3. Spawn watcher proc as well
     Watcher = spawn(?MODULE, request_watcher, [Ref]),
 
-    dict:store(Ref, {Pid, Watcher}, State).
+    dict:store(Ref, {CB, Watcher}, State).
 
 %% @doc Perform request completion
 -spec(do_complete_request(any(), dict()) -> dict()).
@@ -264,12 +265,13 @@ do_complete_request(Msg, Dict) ->
 
     %% Locate stored request
     case dict:find(Ref, Dict) of
-        {ok, {Pid, Watcher}} ->
+        {ok, {CB, Watcher}} ->
             hordad_log:info(?MODULE,
                              "~p: completing request: ~9999p", [Ref, Val]),
 
             Watcher ! completed,
-            Pid ! Val,
+            run_callback(CB, Val),
+
             dict:erase(Ref, Dict);
         erorr ->
             hordad_log:warning(?MODULE,
@@ -280,7 +282,7 @@ do_complete_request(Msg, Dict) ->
 
 %% @doc Request watcher
 request_watcher(Ref) ->
-    Timeout = hordad_lcf:get_var({hordad_dht, get_timeout}),
+    Timeout = hordad_lcf:get_var({hordad_dht, net_timeout}),
 
     % Ensure request has completed
     receive
@@ -290,3 +292,39 @@ request_watcher(Ref) ->
         Timeout ->
             complete_request({timeout, Ref})
     end.
+
+%% @doc Run callback depending on its type.
+-spec(run_callback(callback(), any()) -> ok).
+
+run_callback(CB, Value) when is_pid(CB) ->
+    CB ! Value,
+    ok;
+run_callback(CB, Value) when is_function(CB) ->
+    CB(Value),
+    ok;
+run_callback({Module, Fun, Args}, Value) ->
+    Module:Fun([Value | Args]),
+    ok.
+
+%% @doc Check if node id is already set and if not, set it
+-spec(set_node_id() -> ok).
+    
+set_node_id() ->
+    case hordad_lcf:get_var({hordad_dht, node_id}, undefined) of
+        undefined ->
+            NodeId = case hordad_dht_meta:lookup(node_id) of
+                         [Id] ->
+                             Id;
+                         undefined ->
+                             % No ID yet, generate new one
+                             Id = hordad_dht_lib:gen_id(
+                                    hordad_lcf:get_var({hordad_dht, node_ip})),
+                             hordad_dht_meta:insert({node_id, Id}),
+
+                             Id
+                     end,
+
+            hordad_lcf:set_var({hordad_dht, node_id}, NodeId)
+    end,
+    
+    ok.
