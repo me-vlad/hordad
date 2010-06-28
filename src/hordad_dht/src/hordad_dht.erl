@@ -254,22 +254,16 @@ join_dht(EntryPoint) ->
 
 %% @doc Forward message to another node
 forward(Msg, Key, Ref, #leaf_set_entry{ip=NextIP}, IP) ->
-    Timeout = hordad_lcf:get_var({hordad_dht, net_timeout}),
-
-    ok = hordad_lib_net:gen_session(?MODULE, NextIP,
-                                    ?SERVICE_TAG,
-                                    {route, Msg, Key, Ref, IP}, Timeout),
-
-    ok.
+    send_engine({route, Msg, Key, Ref, IP}, NextIP).
 
 %% @doc Workhouse for deliver/4
 do_deliver(get, Key, Ref, IP) ->
     Val = hordad_dht_storage:lookup(Key, undefined),
-    deliver_engine({get_result, Val, Ref}, IP);
+    send_engine({get_result, Val, Ref}, IP);
 
 do_deliver({set, Value}, Key, Ref, IP) ->
     ok = hordad_dht_storage:insert(Key, Value),
-    deliver_engine({set_result, ok, Ref}, IP).
+    send_engine({set_result, ok, Ref}, IP).
 
 %% @doc Init new request
 do_init_request(Msg, Key, CB, State) ->
@@ -365,7 +359,7 @@ set_node_id() ->
     ok.
 
 %% @doc Send a message to remote node
-deliver_engine(Msg, IP) ->
+send_engine(Msg, IP) ->
     Timeout = hordad_lcf:get_var({hordad_dht, net_timeout}),
 
     ok = hordad_lib_net:gen_session(?MODULE, IP, ?SERVICE_TAG, Msg, Timeout),
