@@ -16,7 +16,9 @@
 %% API
 -export([start_link/0,
          get_async/2,
-         get_sync/1
+         get_sync/1,
+         set_async/3,
+         set_sync/2
         ]).
 
 %% Internal stuff
@@ -56,7 +58,7 @@ start_link() ->
 %%      the CB argument can be either pid() or fun() or
 %%      tuple in format {Module, Fun, Args}.
 %%      The callback will be passed and argument/sent a message in form:
-%%      {get_result, Key, Value} or {error, Reason}
+%%      {get_result, Value} or {error, Reason}
 -spec(get_async(any(), callback()) -> ok).
 
 get_async(Key, CB) when ?is_callback(CB) ->
@@ -75,7 +77,32 @@ get_sync(Key) ->
     spawn(F),
     
     receive
-        {get_result, Key, Value} ->
+        {get_result, Value} ->
+            {ok, Value};
+        {error, _}=E ->
+            E
+    end.
+
+%% @doc Set key value asynchronously. See get_async/2 description.
+-spec(set_async(any(), any(), callback()) -> ok).
+
+set_async(Key, Value, CB) when ?is_callback(CB) ->
+    gen_server:call(?SERVER, {set, Key, Value, CB}).
+
+%% @doc Synchronous version of set
+-spec(set_sync(any(), any()) -> {ok, any()} | {error, any()}).
+
+set_sync(Key, Value) ->
+    Self = self(),
+
+    F = fun() ->
+                set_async(Key, Value, Self)
+        end,
+
+    spawn(F),
+    
+    receive
+        {set_result, Value} ->
             {ok, Value};
         {error, _}=E ->
             E
@@ -96,7 +123,9 @@ complete_request(Msg) ->
 
 service_handler({route, Msg, Key, Ref, IP}, _Socket) ->
     route(Msg, Key, Ref, IP);
-service_handler({get_result, _Key, _Val, _Ref}=Msg, _Socket) ->
+service_handler({get_result, _Val, _Ref}=Msg, _Socket) ->
+    complete_request(Msg);
+service_handler({set_result, _Val, _Ref}=Msg, _Socket) ->
     complete_request(Msg).
 
 %%====================================================================
@@ -139,6 +168,8 @@ init([]) ->
 
 handle_call({get, Key, CB}, _From, State) ->
     {reply, ok, do_init_request(get, Key, CB, State)};
+handle_call({set, Key, Value, CB}, _From, State) ->
+    {reply, ok, do_init_request({set, Value}, Key, CB, State)};
 handle_call({deliver, Msg, Key, Ref, IP}, _From, State) ->
     {reply, do_deliver(Msg, Key, Ref, IP), State};
 handle_call({complete_request, Msg}, _From, State) ->
@@ -223,20 +254,22 @@ join_dht(EntryPoint) ->
 
 %% @doc Forward message to another node
 forward(Msg, Key, Ref, #leaf_set_entry{ip=NextIP}, IP) ->
+    Timeout = hordad_lcf:get_var({hordad_dht, net_timeout}),
+
     ok = hordad_lib_net:gen_session(?MODULE, NextIP,
                                     ?SERVICE_TAG,
-                                    {route, Msg, Key, Ref, IP}, 20),
+                                    {route, Msg, Key, Ref, IP}, Timeout),
 
     ok.
 
 %% @doc Workhouse for deliver/4
 do_deliver(get, Key, Ref, IP) ->
     Val = hordad_dht_storage:lookup(Key, undefined),
+    deliver_engine({get_result, Val, Ref}, IP);
 
-    ok = hordad_lib_net:gen_session(?MODULE, IP,
-                                    ?SERVICE_TAG,
-                                    {get_result, Key, Val, Ref}, 20),
-    ok.
+do_deliver({set, Value}, Key, Ref, IP) ->
+    ok = hordad_dht_storage:insert(Key, Value),
+    deliver_engine({set_result, ok, Ref}, IP).
 
 %% @doc Init new request
 do_init_request(Msg, Key, CB, State) ->
@@ -257,8 +290,10 @@ do_init_request(Msg, Key, CB, State) ->
 
 do_complete_request(Msg, Dict) ->
     {Ref, Val} = case Msg of
-                     {get_result, Key, Value, RefOrig} ->
-                         {RefOrig, {get_result, Key, Value}};
+                     {get_result, Value, RefOrig} ->
+                         {RefOrig, {get_result, Value}};
+                     {set_result, Value, RefOrig} ->
+                         {RefOrig, {set_result, Value}};
                      {timeout, RefOrig} ->
                          {RefOrig, {error, timeout}}
                  end,
@@ -327,4 +362,11 @@ set_node_id() ->
             hordad_lcf:set_var({hordad_dht, node_id}, NodeId)
     end,
     
+    ok.
+
+%% @doc Send a message to remote node
+deliver_engine(Msg, IP) ->
+    Timeout = hordad_lcf:get_var({hordad_dht, net_timeout}),
+
+    ok = hordad_lib_net:gen_session(?MODULE, IP, ?SERVICE_TAG, Msg, Timeout),
     ok.
