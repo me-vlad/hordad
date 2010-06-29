@@ -45,16 +45,14 @@ start() ->
 %% specifications.
 %%--------------------------------------------------------------------
 init([]) ->
-    LCF = {hordad_lcf, {hordad_lcf_sup, start_link, []},
-           permanent, 2000, worker, [hordad_lcf]},
+    Master = {hordad_master, {hordad_master, start_link, []},
+              permanent, infinity, supervisor, []},
 
-    Log = {hordad_log, {hordad_log_sup, start_link, []},
-           permanent, 2000, worker, [hordad_log]},
+    %% Start tier1 apps first
+    ok = application:start(hordad_lcf),
+    ok = application:start(hordad_log),
 
-    Tier2 = {hordad_tier2, {hordad_tier2_sup, start_link, []},
-             permanent, infinity, supervisor, []},
-
-    {ok,{{one_for_one, 5, 1}, [LCF, Log, Tier2]}}.
+    {ok,{{one_for_one, 5, 1}, [Master]}}.
 
 %%====================================================================
 %% Internal functions

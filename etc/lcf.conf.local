@@ -1,5 +1,29 @@
 %%% Hordad local configuration
 
+%% Master  ------------------------------------------
+%% How often to run watchdog proc (in sec).
+{{hordad_master, interval}, 30}.
+
+%% List of applications to start and watch for
+{{hordad_master, applications},
+ [
+  % Tier1
+  hordad_lcf,
+  hordad_log,
+
+  % Tier2
+  hordad_rooms,
+  hordad_registrar,
+
+  % Tier3
+  hordad_gk,
+  %hordad_gts,
+  hordad_aes_agent,
+  hordad_aes_poller
+  %hordad_aes_ag
+ ]}.
+                                
+%% SSL  ------------------------------------------
 %% Whether to use SSL/TLS connection between nodes
 {{hordad, ssl}, false}.
 
@@ -23,21 +47,6 @@
 
 %% Logging level. List of error, warning, info or all
 {{hordad_log, levels}, all}.
-
-%% Tier 2 applications to start
-{{hordad_tier2, applications},
- [hordad_rooms,
-  hordad_registrar
- ]}.
-
-%% Tier 3 applications to start
-{{hordad_tier3, applications},
- [hordad_gk,
-%  hordad_gts,
-  hordad_aes_agent,
-  hordad_aes_poller
-%  hordad_aes_ag
- ]}.
 
 %% Rooms manager database filename
 {{hordad_rooms, db}, "hordad_rooms.db"}.
