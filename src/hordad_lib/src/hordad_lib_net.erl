@@ -209,26 +209,33 @@ connect(Node, Timeout) ->
 
 %% @doc Generic functions which provide quick way of sending single message
 %%      to another hordad node and receiving response.
--spec(gen_session(address(), string(), any()) -> any()).
+-spec(gen_session(address(), string(), any()) -> {ok, any()} | {error, any()}).
 
 gen_session(Node, Header, Message) ->
     gen_session(?MODULE, Node, Header, Message, infinity).
 
--spec(gen_session(address(), string(), any(), timeout()) -> any()).
+-spec(gen_session(address(), string(), any(), timeout()) ->
+             {ok, any()} | {error, any()}).
 
 gen_session(Node, Header, Message, Timeout) ->
     gen_session(?MODULE, Node, Header, Message, Timeout).
 
--spec(gen_session(atom(), address(), string(), any(), timeout()) -> any()).
+-spec(gen_session(atom(), address(), string(), any(), timeout()) ->
+             {ok, any()} | {error, any()}).
 
 gen_session(Module, Node, Header, Message, Timeout) ->
-    {ok, S} = connect(Node, Timeout),
-    ok = write_socket(Module, S, make_header(Header)),
-    ok = write_socket(Module, S, make_message(Message)),
-    {ok, R} = read_extract_socket(Module, S, 0, Timeout),
-    close_socket(Module, S),
-
-    R.
+    try
+        {ok, S} = connect(Node, Timeout),
+        ok = write_socket(Module, S, make_header(Header)),
+        ok = write_socket(Module, S, make_message(Message)),
+        {ok, R} = read_extract_socket(Module, S, 0, Timeout),
+        close_socket(Module, S),
+        
+        {ok, R}
+    catch
+        _:E ->
+            {error, E}
+    end.
 
 %% @doc Convert ip from internal to string representation
 ip2str(IP) when is_tuple(IP) ->

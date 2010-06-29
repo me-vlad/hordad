@@ -362,5 +362,6 @@ set_node_id() ->
 send_engine(Msg, IP) ->
     Timeout = hordad_lcf:get_var({hordad_dht, net_timeout}),
 
-    ok = hordad_lib_net:gen_session(?MODULE, IP, ?SERVICE_TAG, Msg, Timeout),
+    {ok, ok} = hordad_lib_net:gen_session(?MODULE, IP, ?SERVICE_TAG, Msg,
+                                          Timeout),
     ok.

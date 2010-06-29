@@ -205,8 +205,8 @@ poll(Poller, Ref, Parent) ->
     hordad_log:info(?MODULE, "Initiating polling session with ~p", [Poller]),
 
     try
-        {ok, Ref, Report} = hordad_lib_net:gen_session(Poller, "aes_poller",
-                                                       {"poll", Ref}),
+        {ok, {ok, Ref, Report}} =
+          hordad_lib_net:gen_session(Poller, "aes_poller", {"poll", Ref}),
 
         Parent ! {Ref, Poller, self(), Report}
     catch
