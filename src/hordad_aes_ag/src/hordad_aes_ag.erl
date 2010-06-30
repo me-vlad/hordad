@@ -90,8 +90,6 @@ init([]) ->
                                                {ram_file, true}
                                               ]),
 
-    hordad_log:log(?MODULE, info, "Module started", []),
-
     spawn(fun() -> worker(?DB_NAME) end),
 
     {ok, ?DB_NAME}.

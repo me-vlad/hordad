@@ -85,8 +85,6 @@ init([]) ->
                                                    {ram_file, true}
                                                   ]),
 
-    hordad_log:log(?MODULE, info, "Module started", []),
-
     {ok, #state{table=?DETS_NAME}}.
 
 %%--------------------------------------------------------------------

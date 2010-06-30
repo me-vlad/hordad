@@ -118,8 +118,6 @@ init([]) ->
 
     Refs = setup_monitor(dets:match_object(?DETS_NAME, '$1'), dict:new()),
 
-    hordad_log:log(?MODULE, info, "Module started", []),
-
     lists:foreach(fun(X) ->
                          create_room(?DETS_NAME, X)
                   end, hordad_lcf:get_var({?MODULE, rooms}, [])),

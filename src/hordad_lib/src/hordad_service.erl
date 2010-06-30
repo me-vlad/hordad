@@ -34,8 +34,6 @@ init(Parent, Name, Module, Tag) ->
 
     Deb = sys:debug_options([]),
 
-    hordad_log:log(Module, info, "Module started", []),
-
     loop(Parent, Deb, Module).
 
 %% @doc Event handling loop

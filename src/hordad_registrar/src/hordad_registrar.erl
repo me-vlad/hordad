@@ -102,8 +102,6 @@ init([]) ->
                           reg(Entry#handler.tag, Entry#handler.cb, State)
                   end, ets:tab2list(Tab)),
 
-    hordad_log:log(?MODULE, info, "Module started", []),
-
     {ok, State}.
 
 %%--------------------------------------------------------------------

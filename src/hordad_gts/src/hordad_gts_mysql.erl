@@ -72,8 +72,6 @@ init([]) ->
 
             {stop, R};
         {ok, _Pid} ->
-            hordad_log:log(?MODULE, info, "Module started", []),
-
             {ok, ?DRIVER_ID}
     end.
 
