@@ -19,12 +19,6 @@
 -spec(gen_id(Data :: any()) -> integer()).
          
 gen_id(Data) ->
-    B = hordad_lcf:get_var({hordad_dht, b}),
-
-    Pow = trunc(math:pow(2, B)),
-    Pad = integer_to_list(round(math:log(256) / math:log(Pow))),
-
-    Fmt = "~" ++ Pad ++ "." ++ integer_to_list(Pow) ++ ".0b",
-
     lists:flatten(
-      [io_lib:format(Fmt, [N]) || <<N>> <= crypto:sha(term_to_binary(Data))]).
+      [io_lib:format("~2.16.0b", [N]) ||
+          <<N>> <= crypto:sha(term_to_binary(Data))]).

@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/0, get_node/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -29,6 +29,11 @@
 %%--------------------------------------------------------------------
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+%% @doc
+get_node(Key) ->
+    gen_server:call(?SERVER, {get_node, Key}).
+
 
 %%====================================================================
 %% gen_server callbacks
@@ -64,7 +69,9 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call(_Request, _From, State) ->
+handle_call({get_node, Key}, _From, State) ->
+    Prefix = shared_prefix(Key, hordad_lcf:get_var({hordad_dht, node_id})),
+
     Reply = ok,
     {reply, Reply, State}.
 
@@ -106,3 +113,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
+
+%% @doc Get length of shared prefix of two keys
+shared_prefix(A, B) ->
+    shared_prefix(A, B, 0).
+
+shared_prefix([X | T1], [X | T2], Acc) ->
+    shared_prefix(T1, T2, Acc + 1);
+shared_prefix(_, _, Acc) ->
+    Acc.
