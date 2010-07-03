@@ -21,29 +21,24 @@ loop() ->
     [RawInterval, Applications] =
         hordad_lcf:get_vars([{hordad_master, interval},
                              {hordad_master, applications}]),
-    Running = [App || {App, _, _} <- application:which_applications()],
 
     Interval = RawInterval * 1000,
 
-    lists:foreach(fun(App) ->
-                          case lists:member(App, Running) of
-                              true ->
-                                  ok;
-                              false ->
-                                  start_app(App)
-                          end
-                  end, Applications),
+    lists:foreach(
+      fun(App) ->
+              case hordad_lib:ensure_started(App) of
+                  {ok, started} ->
+                      hordad_log:info(?MODULE, "Application ~p started",
+                                      [App]);
+                  {ok, running} ->
+                      ok;
+                  {error, E} ->
+                      hordad_log:error(?MODULE, "Error starting application "
+                                       "~p: ~999p", [App, E])
+              end
+      end, Applications),
 
     receive
     after Interval ->
             loop()
-    end.
-
-start_app(App) ->
-    case application:start(App) of
-        ok ->
-            hordad_log:info(?MODULE, "Application ~p started", [App]);
-        {error, E} ->
-            hordad_log:error(?MODULE, "Error starting application "
-                             "~p: ~999p", [App, E])
     end.

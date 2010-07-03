@@ -49,8 +49,8 @@ init([]) ->
               permanent, infinity, supervisor, []},
 
     %% Start tier1 apps first
-    ok = application:start(hordad_lcf),
-    ok = application:start(hordad_log),
+    hordad_lib:ensure_started(hordad_lcf),
+    hordad_lcf:ensure_started(hordad_log),
 
     {ok,{{one_for_one, 5, 1}, [Master]}}.
 

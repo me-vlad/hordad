@@ -21,7 +21,8 @@
          build_child/1,
          getv/2,
          getv/3,
-         setv/3
+         setv/3,
+         ensure_started/1
         ]).
 
 %% @doc Get full path to configuration directory
@@ -105,3 +106,22 @@ getv(Key, List, Default) when is_list(List) ->
 %% @doc Insert key/value pair into proplist, replaces existing one
 setv(Key, Value, List) ->
     [{Key, Value} | proplists:delete(Key, List)].
+
+%% @doc Check if application is started and start it otherwise
+-spec(ensure_started(atom()) ->
+             {ok, running} | {ok, started} | {error, any()}).
+
+ensure_started(App) ->
+    Running = [A || {A, _, _} <- application:which_applications()],
+
+    case lists:member(App, Running) of
+        true ->
+            {ok, running};
+        false ->
+            case application:start(App) of
+                ok ->
+                    {ok, started};
+                {error, _}=E ->
+                    E
+            end
+    end.
