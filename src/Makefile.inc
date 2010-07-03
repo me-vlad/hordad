@@ -1,6 +1,6 @@
 # Application-level makefile template
 
-export ERL_LIBS=..
+export ERL_LIBS=..:/usr/lib
 
 BEAMS: $(patsubst src/%.erl,ebin/%.beam, $(wildcard src/*.erl))
 
