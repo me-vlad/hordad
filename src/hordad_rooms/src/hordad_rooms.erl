@@ -23,11 +23,13 @@
          send/2
         ]).
 
+-export([get_ldb_tables/0]).
+
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(entry, {
+-record(table, {
           room,    % Room name
           members  % List of member pids
          }).
@@ -98,6 +100,12 @@ rooms() ->
 send(Room, Message) ->
     gen_server:call(?SERVER, {send, Room, Message}).
 
+%% @doc hordad_ldb table info callback.
+-spec(get_ldb_tables() -> {Name :: atom(), Attrs :: [{atom(), any()}]}).
+
+get_ldb_tables() ->
+    {rooms, [{attributes, record_info(fields, table)}]}.
+             
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -114,7 +122,7 @@ init([]) ->
                                  hordad_lcf:get_var({?MODULE, db},
                                                     ?DEFAULT_DB_NAME)),
 
-    {ok, ?DETS_NAME} = hordad_lib_storage:new(?DETS_NAME, DBPath, #entry.room),
+    {ok, ?DETS_NAME} = hordad_lib_storage:new(?DETS_NAME, DBPath, #table.room),
 
     Refs = setup_monitor(dets:match_object(?DETS_NAME, '$1'), dict:new()),
 
@@ -149,11 +157,11 @@ handle_call({join, Room, Pid}, _From, #state{table=Table, refs=Refs}=State) ->
     {Reply, NewRefs} = case get_room(Table, Room) of
                            [] ->
                                {{error, unknown}, Refs};
-                           [#entry{}=E] ->
+                           [#table{}=E] ->
                                R = ref_member(Room, Pid, Refs),
                                Res = save_room(Table,
-                                               E#entry{members=
-                                                       [Pid | E#entry.members]
+                                               E#table{members=
+                                                       [Pid | E#table.members]
                                                       }),
                                hordad_log:log(?MODULE, info,
                                               "Member ~p joined room ~p",
@@ -169,7 +177,7 @@ handle_call({members, Room}, _From, #state{table=Table}=State) ->
                 [] ->
                     [];
                 [Entry] ->
-                    Entry#entry.members
+                    Entry#table.members
             end,
 
     {reply, Reply, State};
@@ -237,11 +245,11 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 
 %% @doc Setup monitor for every pid in entry list
--spec(setup_monitor([#entry{}], dict()) -> dict()).
+-spec(setup_monitor([#table{}], dict()) -> dict()).
 
 setup_monitor([], D) ->
     D;
-setup_monitor([#entry{room=Room, members=Members} | T], Dict) ->
+setup_monitor([#table{room=Room, members=Members} | T], Dict) ->
     setup_monitor(T, lists:foldl(fun(Pid, D) -> ref_member(Room, Pid, D) end,
                                  Dict, Members)).
 
@@ -279,14 +287,14 @@ get_refs(Pid, Refs) ->
               end, [], Refs).
 
 %% @doc Save entry to db
--spec(save_room(atom(), #entry{}) -> ok).
+-spec(save_room(atom(), #table{}) -> ok).
 
 save_room(Table, Room) ->
     ok = hordad_lib_storage:insert(Table, Room),
     ok.
 
 %% @doc Get room entry
--spec(get_room(atom(), atom()) -> [#entry{}] | {error, any()}).
+-spec(get_room(atom(), atom()) -> [#table{}] | {error, any()}).
 
 get_room(Table, Room) ->
     dets:lookup(Table, Room).
@@ -295,7 +303,7 @@ get_room(Table, Room) ->
 -spec(get_rooms(atom()) -> [atom()]).
 
 get_rooms(Table) ->
-    dets:foldr(fun(#entry{room=Room}, Acc) ->
+    dets:foldr(fun(#table{room=Room}, Acc) ->
                        [Room | Acc]
                end, [], Table).
 
@@ -306,11 +314,11 @@ remove_member(Pid, Table, Room, Refs) ->
     case get_room(Table, Room) of
         [] ->
             Refs;
-        [#entry{}=E] ->
+        [#table{}=E] ->
             R = unref_member(Room, Pid, Refs),
             save_room(Table,
-                      E#entry{members=
-                              lists:delete(Pid, E#entry.members)}),
+                      E#table{members=
+                              lists:delete(Pid, E#table.members)}),
 
             hordad_log:log(?MODULE, info,
                            "Member ~p left room ~p",
@@ -326,7 +334,7 @@ create_room(Table, Room) ->
         [] ->
             hordad_log:log(?MODULE, info, "Room created: ~p", [Room]),
 
-            save_room(Table, #entry{room=Room, members=[]});
+            save_room(Table, #table{room=Room, members=[]});
         [_ | _] ->
             {error, already_exists};
         _ ->
@@ -340,8 +348,8 @@ remove_room(Table, Room, Force) ->
     case dets:lookup(Table, Room) of
         [] ->
             ok;
-        [#entry{}=E] ->
-            case E#entry.members of
+        [#table{}=E] ->
+            case E#table.members of
                 [] ->
                     hordad_log:info(?MODULE, "Room removed: ~p", [Room]),
                     dets:delete_object(Table, E);
@@ -362,6 +370,6 @@ send_msg(Table, Room, Pid, Msg) ->
         [] ->
             ok;
         [Entry] ->
-            Members = lists:delete(Pid, Entry#entry.members),
+            Members = lists:delete(Pid, Entry#table.members),
             lists:foreach(fun(Member) -> Member ! Msg end, Members)
     end.

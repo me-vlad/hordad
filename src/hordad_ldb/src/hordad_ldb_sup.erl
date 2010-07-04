@@ -1,18 +1,18 @@
 %%% -------------------------------------------------------------------
-%%% File    : hordad_master_sup
+%%% File    : hordad_ldb_sup
 %%% Author  : Max E. Kuznecov <mek@mek.uz.ua>
-%%% Description: Toplevel supervisor
+%%% Description: Application supervisor
 %%%
-%%% Created : 2010-01-04 by Max E. Kuznecov <mek@mek.uz.ua>
+%%% Created : 2010-07-04 by Max E. Kuznecov <mek@mek.uz.ua>
 %%% @copyright 2009-2010 Server Labs
 %%% -------------------------------------------------------------------
 
--module(hordad_master_sup).
+-module(hordad_ldb_sup).
 
 -behaviour(supervisor).
 
 %% API
--export([start_link/0, start/0]).
+-export([start_link/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -29,9 +29,6 @@
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-start() ->
-    start_link().
-
 %%====================================================================
 %% Supervisor callbacks
 %%====================================================================
@@ -45,10 +42,10 @@ start() ->
 %% specifications.
 %%--------------------------------------------------------------------
 init([]) ->
-    Master = {hordad_master, {hordad_master, start_link, []},
-              permanent, infinity, supervisor, []},
+    Child = {hordad_ldb, {hordad_ldb, start_link,[]},
+          permanent, 2000, worker, [hordad_ldb]},
 
-    {ok,{{one_for_one, 5, 1}, [Master]}}.
+    {ok, {{one_for_one, 5, 1}, [Child]}}.
 
 %%====================================================================
 %% Internal functions

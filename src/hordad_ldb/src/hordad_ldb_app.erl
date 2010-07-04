@@ -1,13 +1,13 @@
 %%% -------------------------------------------------------------------
-%%% File    : hordad_master_app
+%%% File    : hordad_ldb_app
 %%% Author  : Max E. Kuznecov <mek@mek.uz.ua>
 %%% Description: Application callback
 %%%
-%%% Created : 23-12-2009 by Max E. Kuznecov <mek@mek.uz.ua>
-%%% @copyright 2009 Server Labs
+%%% Created : 2010-07-04 by Max E. Kuznecov <mek@mek.uz.ua>
+%%% @copyright 2009-2010 Server Labs
 %%% -------------------------------------------------------------------
 
--module(hordad_master_app).
+-module(hordad_ldb_app).
 
 -behaviour(application).
 
@@ -28,12 +28,14 @@
 %% top supervisor of the tree.
 %%--------------------------------------------------------------------
 start(_Type, _Args) ->
-    %% Start tier1 apps first
-    {ok, _} = hordad_lib:ensure_started(hordad_lcf),
-    {ok, _} = hordad_lib:ensure_started(hordad_log),
-    {ok, _} = hordad_lib:ensure_started(hordad_ldb),
-
-    hordad_master_sup:start_link().
+    case start_mnesia() of
+        ok ->
+            hordad_ldb_sup:start_link();
+        E ->
+            hordad_log:error(hordad_ldb, "Error starting mnesia: ~999p",
+                             [E]),
+            E
+    end.
 
 %%--------------------------------------------------------------------
 %% Function: stop(State) -> void()
@@ -42,8 +44,13 @@ start(_Type, _Args) ->
 %% should do any necessary cleaning up. The return value is ignored. 
 %%--------------------------------------------------------------------
 stop(_State) ->
-    application:stop(hordad_ldb),
-    application:stop(hordad_log),
-    application:stop(hordad_lcf),
+    application:stop(mnesia).
 
+start_mnesia() ->
+    application:set_env(mnesia, dir,
+                        hordad_lcf:get_var({hordad_ldb, db_dir})),
+
+    ok = hordad_ldb:init_db(),
+    ok = hordad_ldb:start_db(),
     ok.
+
