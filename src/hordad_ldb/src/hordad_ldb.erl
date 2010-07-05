@@ -40,7 +40,6 @@ start_link() ->
 -spec(init_db() -> ok | {error, any()}).
 
 init_db() ->
-    io:format("### ~p~n", [application:get_env(mnesia, dir)]),
     try
         case mnesia:system_info(use_dir) of
             true ->
