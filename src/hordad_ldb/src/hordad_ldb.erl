@@ -73,8 +73,6 @@ start_db() ->
           end,
           [X:get_ldb_tables() || X <- Tables]),
 
-        ok = mnesia:wait_for_tables(Tables, 30 * 1000),
-
         ok
     catch
         _:E ->
@@ -132,7 +130,7 @@ create_table(Table, Attrs) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    {ok, #state{}}.
+    {ok, ok}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
