@@ -15,7 +15,10 @@
          init_db/0,
          start_db/0,
          table_exists/1,
-         create_table/2
+         create_table/2,
+         write/1,
+         delete/2,
+         read/2
         ]).
 
 %% gen_server callbacks
@@ -23,8 +26,6 @@
          terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
-
--record(state, {}).
 
 %%====================================================================
 %% API
@@ -56,6 +57,8 @@ init_db() ->
 -spec(start_db() -> ok | {error, any()}).
 
 start_db() ->
+    Tables = hordad_lcf:get_var({hordad_ldb, tables}),
+
     try
         {ok, _} = hordad_lib:ensure_started(mnesia),
 
@@ -68,14 +71,39 @@ start_db() ->
                           ok = create_table(Table, Attrs)
                   end
           end,
-          [X:get_ldb_tables() ||
-              X <- hordad_lcf:get_var({hordad_ldb, tables})]),
+          [X:get_ldb_tables() || X <- Tables]),
+
+        ok = mnesia:wait_for_tables(Tables, 30 * 1000),
 
         ok
     catch
         _:E ->
             {error, E}
     end.
+
+%% @doc Write record to database
+-spec(write(record()) -> ok | {error, any()}).
+             
+write(Record) ->
+    run_transaction(fun() ->
+                            mnesia:write(Record)
+                    end).
+
+%% @doc Delete record from database
+-spec(delete(atom(), any()) -> ok | {error, any()}).
+             
+delete(Table, Key) ->
+    run_transaction(fun() ->
+                            mnesia:delete({Table, Key})
+                    end).
+
+%% @doc Get all records with provided key from database
+-spec(read(atom(), any()) -> {ok, [record()]} | {error, any()}).
+             
+read(Table, Key) ->
+    run_transaction(fun() ->
+                            mnesia:read({Table, Key})
+                    end).
 
 %% @doc Check if table already exists
 -spec(table_exists(atom()) -> boolean()).
@@ -159,3 +187,11 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
+
+run_transaction(Fun) ->
+    case mnesia:transaction(Fun) of
+        {atomic, ok} ->
+            ok;
+        {aborted, Reason} ->
+            {error, Reason}
+    end.

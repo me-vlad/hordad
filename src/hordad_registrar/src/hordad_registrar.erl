@@ -19,20 +19,18 @@
          get_cb/1
         ]).
 
+-export([get_ldb_tables/0]).
+
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--define(DEFAULT_DB_NAME, "hordad_registrar.db").
+-define(TABLE, registrar).
 
--record(handler, {tag, % Handler tag
-                  cb   % Callback - {Module, Function, Args}
-                 }).
+-record(registrar, {tag, % Handler tag
+                    cb   % Callback - {Module, Function, Args}
+                   }).
 
--record(state, {table, % Table id
-                path   % Path to db file
-               }).
-          
 %%====================================================================
 %% API
 %%====================================================================
@@ -72,6 +70,12 @@ registered() ->
 get_cb(Tag) ->
     gen_server:call(?MODULE, {get_cb, Tag}).
 
+%% @doc hordad_ldb table info callback.
+-spec(get_ldb_tables() -> {Name :: atom(), Attrs :: [{atom(), any()}]}).
+
+get_ldb_tables() ->
+    {?TABLE, [{attributes, record_info(fields, registrar)}]}.
+
 %%--------------------------------------------------------------------
 %% Function: init(Args) -> {ok, State} |
 %%                         {ok, State, Timeout} |
@@ -80,29 +84,7 @@ get_cb(Tag) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    DBPath = hordad_lib:get_file(db,
-                             hordad_lcf:get_var({hordad_registrar, db},
-                                                ?DEFAULT_DB_NAME)),
-
-    Tab = case ets:file2tab(DBPath) of
-              {ok, T} ->
-                  T;
-              {error, Reason} ->
-                  hordad_log:log(?MODULE, info,
-                                 "Unable to open registrar file ~s: ~9999p. "
-                                 "Creating new one.", [DBPath, Reason]),
-                  ets:new(list_to_atom(?DEFAULT_DB_NAME),
-                          [ordered_set, private, {keypos, #handler.tag}])
-          end,
-
-    State = #state{table=Tab, path=DBPath},
-
-    % Register entries
-    lists:foreach(fun(Entry) ->
-                          reg(Entry#handler.tag, Entry#handler.cb, State)
-                  end, ets:tab2list(Tab)),
-
-    {ok, State}.
+    {ok, ?TABLE}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -113,25 +95,27 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({register, Tag, CB}, _From, State) ->
-    reg(Tag, CB, State),
+handle_call({register, Tag, CB}, _From, Table) ->
+    reg(Tag, CB),
 
-    {reply, ok, State};
-handle_call({unregister, Tag}, _From, State) ->
-    unreg(Tag, State),
+    {reply, ok, Table};
+handle_call({unregister, Tag}, _From, Table) ->
+    unreg(Tag, Table),
 
-    {reply, ok, State};
-handle_call(registered, _From, #state{table=Tab}=State) ->
-    {reply, ets:tab2list(Tab), State};
-handle_call({get_cb, Tag}, _From, #state{table=Tab}=State) ->
-    Reply = case ets:lookup(Tab, Tag) of
-                [] ->
-                    undefined;
-                [#handler{cb=CB}] ->
-                    CB
-            end,
+    {reply, ok, Table};
+handle_call(registered, _From, Table) ->
+    {reply, hordad_ldb:match(#registrar{tag='_', cb='_'}), Table};
+handle_call({get_cb, Tag}, _From, Table) ->
+    {ok, Reply} = hordad_ldb:read(Table, Tag),
+    
+    case Reply of
+        [] ->
+            undefined;
+        [#registrar{cb=CB}] ->
+            CB
+    end,
 
-    {reply, Reply, State}.
+    {reply, Reply, Table}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -158,9 +142,7 @@ handle_info(_Info, State) ->
 %% cleaning up. When it returns, the gen_server terminates with Reason.
 %% The return value is ignored.
 %%--------------------------------------------------------------------
-terminate(Reason, State) ->
-    hordad_log:info(?MODULE, "Shutting down: ~p~n", Reason),
-    sync_tab(State),
+terminate(_Reason, _State) ->
     ok.
 
 %%--------------------------------------------------------------------
@@ -175,21 +157,13 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 
 %% @doc Register new handler
--spec(reg(tag(), handler_cb(), #state{}) -> ok).
+-spec(reg(tag(), handler_cb()) -> ok).
 
-reg(Tag, CB, #state{table=Tab}=State) ->
-    ets:insert(Tab, #handler{tag=Tag, cb=CB}),
-    sync_tab(State),
+reg(Tag, CB) ->
+    ok = hordad_ldb:write(#registrar{tag=Tag, cb=CB}),
     ok.
 
 %% @doc Unregister handler
-unreg(Tag, #state{table=Tab}=State) ->
-    ets:delete(Tab, Tag),
-    sync_tab(State),
+unreg(Tag, Table) ->
+    ok = hordad_ldb:delete(Table, Tag),
     ok.
-
-%% @doc Dump ets contents to file
--spec(sync_tab(#state{}) -> ok | {error, string()}).
-              
-sync_tab(#state{table=Tab, path=File}) ->
-    ets:tab2file(Tab, File).
