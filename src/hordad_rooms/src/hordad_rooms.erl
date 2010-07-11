@@ -39,9 +39,7 @@
           refs
          }).
 
--define(DEFAULT_DB_NAME, "hordad_rooms.db").
 -define(SERVER, ?MODULE).
--define(DETS_NAME, ?MODULE).
 -define(TABLE, rooms).
 
 %%====================================================================
@@ -119,19 +117,15 @@ get_ldb_tables() ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    DBPath = hordad_lib:get_file(db,
-                                 hordad_lcf:get_var({?MODULE, db},
-                                                    ?DEFAULT_DB_NAME)),
+    {ok, Rooms} = hordad_ldb:match(#rooms{room='_', members='_'}),
 
-    {ok, ?DETS_NAME} = hordad_lib_storage:new(?DETS_NAME, DBPath, #rooms.room),
-
-    Refs = setup_monitor(dets:match_object(?DETS_NAME, '$1'), dict:new()),
+    Refs = setup_monitor(Rooms, dict:new()),
 
     lists:foreach(fun(X) ->
-                         create_room(?DETS_NAME, X)
+                         create_room(?TABLE, X)
                   end, hordad_lcf:get_var({?MODULE, rooms}, [])),
 
-    {ok, #state{table=?DETS_NAME, refs=Refs}}.
+    {ok, #state{table=?TABLE, refs=Refs}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -160,8 +154,7 @@ handle_call({join, Room, Pid}, _From, #state{table=Table, refs=Refs}=State) ->
                                {{error, unknown}, Refs};
                            [#rooms{}=E] ->
                                R = ref_member(Room, Pid, Refs),
-                               Res = save_room(Table,
-                                               E#rooms{members=
+                               Res = save_room(E#rooms{members=
                                                        [Pid | E#rooms.members]
                                                       }),
                                hordad_log:log(?MODULE, info,
@@ -288,25 +281,29 @@ get_refs(Pid, Refs) ->
               end, [], Refs).
 
 %% @doc Save entry to db
--spec(save_room(atom(), #rooms{}) -> ok).
+-spec(save_room(#rooms{}) -> ok).
 
-save_room(Table, Room) ->
-    ok = hordad_lib_storage:insert(Table, Room),
+save_room(#rooms{}=Room) ->
+    ok = hordad_ldb:write(Room),
     ok.
 
 %% @doc Get room entry
 -spec(get_room(atom(), atom()) -> [#rooms{}] | {error, any()}).
 
 get_room(Table, Room) ->
-    dets:lookup(Table, Room).
+    case hordad_ldb:read(Table, Room) of
+        {ok, Res} ->
+            Res;
+        E ->
+            E
+    end.
 
 %% @doc Get rooms
 -spec(get_rooms(atom()) -> [atom()]).
 
 get_rooms(Table) ->
-    dets:foldr(fun(#rooms{room=Room}, Acc) ->
-                       [Room | Acc]
-               end, [], Table).
+    {ok, Rooms} = hordad_ldb:all_keys(Table),
+    Rooms.
 
 %% @doc Remove room member and demonitor it
 -spec(remove_member(pid(), atom(), atom(), dict()) -> dict()).
@@ -317,25 +314,22 @@ remove_member(Pid, Table, Room, Refs) ->
             Refs;
         [#rooms{}=E] ->
             R = unref_member(Room, Pid, Refs),
-            save_room(Table,
-                      E#rooms{members=
+            save_room(E#rooms{members=
                               lists:delete(Pid, E#rooms.members)}),
 
             hordad_log:log(?MODULE, info,
-                           "Member ~p left room ~p",
-                           [Pid, Room]),
+                           "Member ~p left room ~p", [Pid, Room]),
             R
     end.
 
 %% @doc Create room.
 %% See create/1 spec
-
 create_room(Table, Room) ->
-    case dets:lookup(Table, Room) of
+    case get_room(Table, Room) of
         [] ->
             hordad_log:log(?MODULE, info, "Room created: ~p", [Room]),
 
-            save_room(Table, #rooms{room=Room, members=[]});
+            save_room(#rooms{room=Room, members=[]});
         [_ | _] ->
             {error, already_exists};
         _ ->
@@ -344,22 +338,23 @@ create_room(Table, Room) ->
 
 %% @doc Remove room.
 %% See remove/1, force_remove/1 spec
-
 remove_room(Table, Room, Force) ->
-    case dets:lookup(Table, Room) of
+    case get_room(Table, Room) of
         [] ->
             ok;
         [#rooms{}=E] ->
             case E#rooms.members of
                 [] ->
                     hordad_log:info(?MODULE, "Room removed: ~p", [Room]),
-                    dets:delete_object(Table, E);
+                    ok = hordad_ldb:delete(Table, E#rooms.room),
+                    ok;
                 _Members ->
                     case Force of
                         false ->
                             {error, not_empty};
                         true  ->
-                            dets:delete_object(Table, E)
+                            ok = hordad_ldb:delete(Table, E#rooms.room),
+                            ok
                     end
             end;
         _ ->

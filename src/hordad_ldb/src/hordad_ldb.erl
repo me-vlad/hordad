@@ -18,7 +18,9 @@
          create_table/2,
          write/1,
          delete/2,
-         read/2
+         read/2,
+         match/1,
+         all_keys/1
         ]).
 
 %% gen_server callbacks
@@ -97,7 +99,7 @@ delete(Table, Key) ->
 
 %% @doc Get all records with provided key from database
 -spec(read(atom(), any()) -> {ok, [record()]} | {error, any()}).
-             
+
 read(Table, Key) ->
     run_transaction(fun() ->
                             mnesia:read({Table, Key})
@@ -118,6 +120,22 @@ create_table(Table, Attrs) ->
             {error, Reason}
     end.
 
+%% @doc Match objects by pattern
+-spec(match(record()) -> {ok, [record()]} | {error, any()}).
+
+match(Pattern) ->
+    run_transaction(fun() ->
+                            mnesia:match_object(Pattern)
+                    end).
+
+%% @doc Get list of all keys in table
+-spec(all_keys(atom()) -> {ok, [atom()]} | {error, any()}).
+
+all_keys(Table) ->
+    run_transaction(fun() ->
+                            mnesia:all_keys(Table)
+                    end).
+    
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -190,6 +208,8 @@ run_transaction(Fun) ->
     case mnesia:transaction(Fun) of
         {atomic, ok} ->
             ok;
+        {atomic, Result} ->
+            {ok, Result};
         {aborted, Reason} ->
             {error, Reason}
     end.
