@@ -1,11 +1,11 @@
 {release, {"Hordad CDN", "0.1"},
-{erts, "5.7.5"},
+{erts, "5.8"},
 [
-{kernel, "2.13.5"},
-{stdlib, "1.16.5"},
-{sasl, "2.1.9"},
-{crypto, "1.6.4"},
-{public_key, "0.5"},
-{ssl, "3.10.8"},
+{kernel, "2.14"},
+{stdlib, "1.17"},
+{sasl, "2.1.9.2"},
+{crypto, "2.0"},
+{public_key, "0.7"},
+{ssl, "4.0"},
 {hordad_master, "0.1"}
 ]}.
