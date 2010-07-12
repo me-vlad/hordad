@@ -18,7 +18,7 @@
          terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
--define(META_DB, hordad_dht_meta).
+-define(TABLE, dht_meta).
 
 %%====================================================================
 %% API
@@ -66,18 +66,7 @@ insert(Data) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    DBPath = hordad_lib:get_file(db,
-                                 hordad_lcf:get_var({hordad_dht, meta_db})),
-
-    case hordad_lib_storage:new(?META_DB, DBPath, 1) of
-        {ok, _DB}=Ok ->
-            Ok;
-        {error, Reason} ->
-            hordad_lob:error("Unable to open meta database: ~9999p",
-                             [Reason]),
-            {stop, Reason}
-    end.
-
+    {ok, ?TABLE}.
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
 %%                                      {reply, Reply, State, Timeout} |
@@ -87,18 +76,19 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({lookup, Key, Default}, _From, State) ->
-    Reply = case dets:lookup(Key) of
-                [] ->
+handle_call({lookup, Key, Default}, _From, Table) ->
+    Reply = case hordad_ldb:read(Table, Key) of
+                {ok, []} ->
                     Default;
-                List when is_list(List) ->
+                {ok, List} when is_list(List) ->
                     List;
                 {error, Reason} ->
-                    hordad_log:warning("Error in DB lookup: ~9999p", [Reason]),
+                    hordad_log:warning(?MODULE,
+                                       "Error in DB lookup: ~9999p", [Reason]),
                     Default
             end,
 
-    {reply, Reply, State}.
+    {reply, Reply, Table}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |

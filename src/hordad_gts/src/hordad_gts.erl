@@ -4,7 +4,6 @@
 %%% Description: GeoTargeting system
 %%%
 %%% Created : 2010-02-10 by Max E. Kuznecov <mek@mek.uz.ua>
-%%% @copyright 2009-2010 Server Labs
 %%% -------------------------------------------------------------------
 -module(hordad_gts).
 
@@ -20,6 +19,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-export([get_ldb_tables/0]).
+
 -import(hordad_gts_lib, [
                          get_tp_conf/0,
                          get_tp_by_ip/1,
@@ -29,17 +30,12 @@
                         ]).
 
 -define(SERVER, ?MODULE).
--define(DETS_NAME, ?MODULE).
--define(DEFAULT_DB_NAME, "hordad_gts.db").
+-define(TABLE, gts).
 
--record(entry, {
+-record(gts, {
           tp,          % TP name
           on_tp,       % Hosting TP name
           on_ip        % Hosting IP addr
-          }).
-
--record(state, {
-          table
           }).
 
 -type(ip() :: {integer(), integer(), integer(), integer()}).
@@ -64,6 +60,12 @@ status() ->
 process_data(Data) ->
     gen_server:call(?SERVER, {process_data, Data}).
 
+%% @doc hordad_ldb table info callback.
+-spec(get_ldb_tables() -> {Name :: atom(), Attrs :: [{atom(), any()}]}).
+
+get_ldb_tables() ->
+    {?TABLE, [{attributes, record_info(fields, gts)}]}.
+
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -76,16 +78,7 @@ process_data(Data) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    DBPath = hordad_lib:get_file(db,
-                                 hordad_lcf:get_var({?MODULE, db},
-                                                    ?DEFAULT_DB_NAME)),
-
-    {ok, ?DETS_NAME} = dets:open_file(?DETS_NAME, [{keypos, #entry.tp},
-                                                   {file, DBPath},
-                                                   {ram_file, true}
-                                                  ]),
-
-    {ok, #state{table=?DETS_NAME}}.
+    {ok, ?TABLE}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -96,7 +89,7 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({process_data, Data}, _From, #state{table=Table}=State) ->
+handle_call({process_data, Data}, _From, Table) ->
     TPData = get_tp_conf(),
 
     % Append all ips from tps, where affected IP stated in fallback
@@ -126,13 +119,13 @@ handle_call({process_data, Data}, _From, #state{table=Table}=State) ->
                 fun(N, Acc) ->
                         AccNew = lists:flatten([AffectedByFallback(N) | Acc]),
 
-                        case dets:match_object(Table,
-                                               {'_', '_', '_', N}) of
-                            [] ->
+                        case hordad_ldb:match(#gts{tp='_', on_tp='_',
+                                                   on_ip=N}) of
+                            {ok, []} ->
                                 AccNew;
-                            List ->
+                            {ok, List} ->
                                 lists:flatten([get_tp_nodes(SrcTP, any) ||
-                                                  #entry{tp=SrcTP} <- List])
+                                                  #gts{tp=SrcTP} <- List])
                                     ++ AccNew
                         end
                 end, Data, Data)),
@@ -143,7 +136,7 @@ handle_call({process_data, Data}, _From, #state{table=Table}=State) ->
           lists:foldr(fun(Node, Acc) ->
                               case get_tp_by_ip(Node) of
                                   {ok, TP} ->
-                                      case handle_data(Node, TP, State) of
+                                      case handle_data(Node, TP) of
                                           undefined ->
                                               Acc;
                                           QList ->
@@ -167,13 +160,15 @@ handle_call({process_data, Data}, _From, #state{table=Table}=State) ->
                              [Reason, Result])
     end,
 
-    {reply, ok, State};
-handle_call(status, _From, #state{table=Table}=State) ->
-    Status = dets:foldl(fun(#entry{tp=TP, on_tp=OnTP, on_ip=OnIP}, Acc) ->
-                                [{TP, OnTP, OnIP} | Acc]
-                        end, [], Table),
+    {reply, ok, Table};
+handle_call(status, _From, Table) ->
+    Status = hordad_ldb:foldl(
+               fun(#gts{tp=TP, on_tp=OnTP, on_ip=OnIP}, Acc) ->
+                       [{TP, OnTP, OnIP} | Acc]
+               end, [], Table),
 
-    {reply, Status, State}.
+    {reply, Status, Table}.
+
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
 %%                                      {noreply, State, Timeout} |
@@ -213,7 +208,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%--------------------------------------------------------------------
 
-
 %% @doc Expand list of possible TP names in fallback into list of IPs
 -spec(expand_fallback(atom()) -> [ip()]).
               
@@ -229,11 +223,10 @@ expand_fallback(TP) ->
                       end, FallbackData)
     end.
 
-        
 %% @doc Handle node state switching
--spec(handle_data(ip(), atom(), atom()) -> [Query :: binary()] | undefined).
+-spec(handle_data(ip(), atom()) -> [Query :: binary()] | undefined).
 
-handle_data(Node, TP, #state{table=Table}) ->
+handle_data(Node, TP) ->
     TPData = hordad_lib:getv(TP, get_tp_conf()),
     Fallback = hordad_lib:getv(fallback, TPData, []),
     DBName = hordad_lib:getv(db, hordad_lcf:get_var({?MODULE, driver_config})),
@@ -244,15 +237,13 @@ handle_data(Node, TP, #state{table=Table}) ->
         {IP, IP} ->
             hordad_log:info(?MODULE, "~p on TP ~p changed to IP ~p",
                             [Node, TP, IP]),
-            dets:insert(Table, #entry{tp=TP, on_tp=IP, on_ip=IP}),
-            dets:sync(Table),
+            hordad_ldb:write(#gts{tp=TP, on_tp=IP, on_ip=IP}),
             
             [build_query(DBName, TP, IP, Domain) || Domain <- Domains];
         {NewIP, NewTP} ->
             hordad_log:info(?MODULE, "~p on TP ~p changed to IP ~p on TP ~p",
                             [Node, TP, NewIP, NewTP]),
-            dets:insert(Table, #entry{tp=TP, on_tp=NewTP, on_ip=NewIP}),
-            dets:sync(Table),
+            hordad_ldb:write(#gts{tp=TP, on_tp=NewTP, on_ip=NewIP}),
 
             [build_query(DBName, TP, NewIP, Domain) || Domain <- Domains];
         undefined ->

@@ -23,14 +23,15 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-export([get_ldb_tables/0]).
+
 -include_lib("hordad_aes_agent/include/hordad_aes_agent.hrl").
 
 -define(SERVER, ?MODULE).
 -define(DEFAULT_CYCLE_PERIOD, 60000).
--define(DB_NAME, ?MODULE).
--define(DEFAULT_DB_NAME, "hordad_aes_ag.db").
+-define(TABLE, aes_ag).
 
--record(entry, {
+-record(aes_ag, {
           node,       % Node IP
           report,     % Node report (#agent_report)
           status      % Node calculated status
@@ -70,6 +71,12 @@ lar(IP) ->
 report(IP) ->
     gen_server:call(?SERVER, {report, IP}).
 
+%% @doc hordad_ldb table info callback.
+-spec(get_ldb_tables() -> {Name :: atom(), Attrs :: [{atom(), any()}]}).
+
+get_ldb_tables() ->
+    {?TABLE, [{attributes, record_info(fields, aes_ag)}]}.
+
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -82,17 +89,9 @@ report(IP) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    DBPath = hordad_lib:get_file(db, hordad_lcf:get_var({?MODULE, db},
-                                                        ?DEFAULT_DB_NAME)),
+    spawn(fun() -> worker(?TABLE) end),
 
-    {ok, ?DB_NAME} = dets:open_file(?DB_NAME, [{keypos, #entry.node},
-                                               {file, DBPath},
-                                               {ram_file, true}
-                                              ]),
-
-    spawn(fun() -> worker(?DB_NAME) end),
-
-    {ok, ?DB_NAME}.
+    {ok, ?TABLE}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -280,8 +279,8 @@ process_data(Data, Table) ->
     F = fun({Node, Report}, Acc) ->
                 NewStatus = calc_status(Node, Report),
 
-                case dets:lookup(Table, Node) of
-                    [#entry{status=OldStatus}=OldEntry] ->
+                case hordad_ldb:read(Table, Node) of
+                    [#aes_ag{status=OldStatus}=OldEntry] ->
                         {NewAcc, NewEntry} =
                             if
                                 % Changed
@@ -289,23 +288,20 @@ process_data(Data, Table) ->
                                     status_handler(Node, OldStatus, NewStatus),
 
                                     {[Node | Acc],
-                                     OldEntry#entry{status=NewStatus,
-                                                    report=Report}};
+                                     OldEntry#aes_ag{status=NewStatus,
+                                                     report=Report}};
                                 % Status not changed, just update report
                                 true ->
-                                    {Acc, OldEntry#entry{report=Report}}
+                                    {Acc, OldEntry#aes_ag{report=Report}}
                             end,
 
-                        dets:insert(Table, NewEntry),
-                        dets:sync(Table),
+                        hordad_ldb:write(NewEntry),
 
                         NewAcc;
                     %% New entry
                     [] ->
-                        dets:insert(Table, #entry{node=Node, status=NewStatus,
-                                                  report=Report}),
-                        dets:sync(Table),
-
+                        hordad_ldb:write(#aes_ag{node=Node, status=NewStatus,
+                                                 report=Report}),
                         Acc;
                     %% No change
                     _ ->
@@ -351,16 +347,17 @@ status_handler(Node, Old, New) ->
 
 %% @doc Get all nodes status. Workhouse for status/0
 get_status(Table) ->
-    dets:foldl(fun(#entry{node=Node, status=Status, report=Report}, Acc) ->
-                       [{Node, Status, Report} | Acc]
-               end, [], Table).
+    hordad_ldb:foldl(
+      fun(#aes_ag{node=Node, status=Status, report=Report}, Acc) ->
+              [{Node, Status, Report} | Acc]
+      end, [], Table).
 
 %% @doc Get status of requested node. Workhouse for status/1
 get_status(Table, Node) ->
-    case dets:lookup(Table, Node) of
-        [] ->
+    case hordad_ldb:read(Table, Node) of
+        {ok, []} ->
             undefined;
-        [#entry{status=Status}] ->
+        {ok, [#aes_ag{status=Status}]} ->
             Status
     end.
 
@@ -375,10 +372,10 @@ get_lar(Table, Node) ->
 
 %% @doc Get report of requested node. Workhouse for report/1
 get_report(Table, Node) ->
-    case dets:lookup(Table, Node) of
-        [] ->
+    case hordad_ldb:read(Table, Node) of
+        {ok, []} ->
             undefined;
-        [#entry{report=Report}] ->
+        {ok, [#aes_ag{report=Report}]} ->
             Report
     end.
 

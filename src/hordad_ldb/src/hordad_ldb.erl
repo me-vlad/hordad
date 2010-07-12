@@ -20,7 +20,8 @@
          delete/2,
          read/2,
          match/1,
-         all_keys/1
+         all_keys/1,
+         foldl/3
         ]).
 
 %% gen_server callbacks
@@ -135,7 +136,16 @@ all_keys(Table) ->
     run_transaction(fun() ->
                             mnesia:all_keys(Table)
                     end).
-    
+
+%% @doc Perform folding on table entries
+foldl(Fun, Acc, Table) ->    
+    case mnesia:foldl(Fun, Acc, Table) of
+        {abort, Reason} ->
+            {error, Reason};
+        Res ->
+            Res
+    end.
+
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
