@@ -10,6 +10,8 @@
 
 -behaviour(gen_server).
 
+-include("hordad_dht.hrl").
+
 %% API
 -export([start_link/0, get_node/1]).
 
@@ -17,7 +19,9 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--define(ROUTE_DB, hordad_dht_route).
+-export([get_ldb_tables/0]).
+
+-define(TABLE, dht_route).
 -define(SERVER, ?MODULE).
 
 %%====================================================================
@@ -34,6 +38,12 @@ start_link() ->
 get_node(Key) ->
     gen_server:call(?SERVER, {get_node, Key}).
 
+%% @doc hordad_ldb table info callback.
+-spec(get_ldb_tables() -> {Name :: atom(), Attrs :: [{atom(), any()}]}).
+
+get_ldb_tables() ->
+    {?TABLE, [{attributes, record_info(fields, dht_leaf_set)},
+              {type, ordered_set}]}.
 
 %%====================================================================
 %% gen_server callbacks
@@ -47,18 +57,7 @@ get_node(Key) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    DBPath = hordad_lib:get_file(db,
-                                 hordad_lcf:get_var({hordad_dht, route_db})),
-
-
-    case hordad_lib_storage:new(?ROUTE_DB, DBPath, 1) of
-        {ok, _DB}=Ok ->
-            Ok;
-        {error, Reason} ->
-            hordad_lob:error("Unable to open route database: ~9999p",
-                             [Reason]),
-            {stop, Reason}
-    end.
+    {ok, ?TABLE}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |

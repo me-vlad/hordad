@@ -8,10 +8,8 @@
 
 -module(hordad_ldb).
 
--behaviour(gen_server).
-
 %% API
--export([start_link/0,
+-export([
          init_db/0,
          start_db/0,
          table_exists/1,
@@ -19,26 +17,13 @@
          write/1,
          delete/2,
          read/2,
+         read/3,
          match/1,
          all_keys/1,
-         foldl/3
+         foldl/3,
+         first/1,
+         last/1
         ]).
-
-%% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
-
--define(SERVER, ?MODULE).
-
-%%====================================================================
-%% API
-%%====================================================================
-%%--------------------------------------------------------------------
-%% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
-%% Description: Starts the server
-%%--------------------------------------------------------------------
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %% @doc Init database
 -spec(init_db() -> ok | {error, any()}).
@@ -106,6 +91,17 @@ read(Table, Key) ->
                             mnesia:read({Table, Key})
                     end).
 
+%% @doc Get all records with provided key from database or return default value
+-spec(read(atom(), any(), any()) -> {ok, [record()]} | {error, any()}).
+
+read(Table, Key, Default) ->
+    case read(Table, Key) of
+        {ok, []} ->
+            {ok, Default};
+        X ->
+            X
+    end.
+
 %% @doc Check if table already exists
 -spec(table_exists(atom()) -> boolean()).
 
@@ -138,77 +134,30 @@ all_keys(Table) ->
                     end).
 
 %% @doc Perform folding on table entries
-foldl(Fun, Acc, Table) ->    
-    case mnesia:foldl(Fun, Acc, Table) of
-        {abort, Reason} ->
-            {error, Reason};
-        Res ->
-            Res
-    end.
+foldl(Fun, Acc, Table) ->
+    run_transaction(fun() ->
+                            mnesia:foldl(Fun, Acc, Table)
+                    end).
 
-%%====================================================================
-%% gen_server callbacks
-%%====================================================================
+%% @doc Return the first entry in table, only meaningful for ordered_set
+%%      type tables.
+%% @end
+-spec(first(atom()) -> {ok, any()} | {error, any()}).
 
-%%--------------------------------------------------------------------
-%% Function: init(Args) -> {ok, State} |
-%%                         {ok, State, Timeout} |
-%%                         ignore               |
-%%                         {stop, Reason}
-%% Description: Initiates the server
-%%--------------------------------------------------------------------
-init([]) ->
-    {ok, ok}.
+first(Table) ->
+    run_transaction(fun() ->
+                            mnesia:first(Table)
+                    end).
 
-%%--------------------------------------------------------------------
-%% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
-%%                                      {reply, Reply, State, Timeout} |
-%%                                      {noreply, State} |
-%%                                      {noreply, State, Timeout} |
-%%                                      {stop, Reason, Reply, State} |
-%%                                      {stop, Reason, State}
-%% Description: Handling call messages
-%%--------------------------------------------------------------------
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+%% @doc Return the last entry in table, only meaningful for ordered_set
+%%      type tables.
+%% @end
+-spec(last(atom()) -> {ok, any()} | {error, any()}).
 
-%%--------------------------------------------------------------------
-%% Function: handle_cast(Msg, State) -> {noreply, State} |
-%%                                      {noreply, State, Timeout} |
-%%                                      {stop, Reason, State}
-%% Description: Handling cast messages
-%%--------------------------------------------------------------------
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-%%--------------------------------------------------------------------
-%% Function: handle_info(Info, State) -> {noreply, State} |
-%%                                       {noreply, State, Timeout} |
-%%                                       {stop, Reason, State}
-%% Description: Handling all non call/cast messages
-%%--------------------------------------------------------------------
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-%%--------------------------------------------------------------------
-%% Function: terminate(Reason, State) -> void()
-%% Description: This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any necessary
-%% cleaning up. When it returns, the gen_server terminates with Reason.
-%% The return value is ignored.
-%%--------------------------------------------------------------------
-terminate(_Reason, _State) ->
-    application:stop(mnesia),
-
-    ok.
-
-%%--------------------------------------------------------------------
-%% Func: code_change(OldVsn, State, Extra) -> {ok, NewState}
-%% Description: Convert process state when code is changed
-%%--------------------------------------------------------------------
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+last(Table) ->
+    run_transaction(fun() ->
+                            mnesia:last(Table)
+                    end).
 
 %%--------------------------------------------------------------------
 %%% Internal functions

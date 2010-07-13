@@ -18,7 +18,9 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--define(TAB_NAME, hordad_dht_leaf_set).
+-export([get_ldb_tables/0]).
+
+-define(TABLE, dht_leaf_set).
 -define(SERVER, ?MODULE).
 
 -type(id() :: integer()).
@@ -34,10 +36,17 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %% @doc Check if provided node id falls into our leaf set
--spec(has_node(id()) -> self | false | {has, #leaf_set_entry{}}).
+-spec(has_node(id()) -> self | false | {has, #dht_leaf_set{}}).
 
 has_node(NodeID) ->
     gen_server:call(?SERVER, {has_node, NodeID}).
+
+%% @doc hordad_ldb table info callback.
+-spec(get_ldb_tables() -> {Name :: atom(), Attrs :: [{atom(), any()}]}).
+
+get_ldb_tables() ->
+    {?TABLE, [{attributes, record_info(fields, dht_leaf_set)},
+              {type, ordered_set}]}.
 
 %%====================================================================
 %% gen_server callbacks
@@ -51,19 +60,7 @@ has_node(NodeID) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    DBPath = hordad_lib:get_file(db,
-                                 hordad_lcf:get_var({hordad_dht_,
-                                                     leaf_set_db})),
-
-    Tab = case ets:file2tab(DBPath) of
-              {ok, T} ->
-                  T;
-              {error, _} ->
-                  ets:new(?TAB_NAME, [ordered_set,
-                                      {keypos, #leaf_set_entry.id}])
-          end,
-    
-    {ok, Tab}.
+    {ok, ?TABLE}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -118,8 +115,8 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @doc Workhouse for has_node/1
 do_has_node(Id, Tab) ->
-    First = ets:first(Tab),
-    Last = ets:last(Tab),
+    {ok, First} = hordad_ldb:first(Tab),
+    {ok, Last} = hordad_ldb:last(Tab),
     SelfId = hordad_lcf:get_var({hordad_dht, node_id}),
 
     case First of
@@ -127,23 +124,23 @@ do_has_node(Id, Tab) ->
         '$end_of_table' ->
             false;
         _ ->
-            [FirstEntry | _] = ets:lookup(Tab, First),
+            {ok, [FirstEntry]} = hordad_ldb:read(Tab, First),
 
             if
                 Id < First orelse Id > Last ->
                     false;
                 % Get closest node id
                 true ->
-                    Next = ets:foldl(
-                             fun(#leaf_set_entry{id=KeyId}=Entry, Acc) when
-                                Id - KeyId < Acc ->
-                                     Entry;
-                                (_, Acc) ->
-                                     Acc
-                             end, FirstEntry, Tab),
-                    
+                    {ok, Next} = hordad_ldb:foldl(
+                                   fun(#dht_leaf_set{id=KeyId}=Entry, Acc) when
+                                      Id - KeyId < Acc ->
+                                           Entry;
+                                      (_, Acc) ->
+                                           Acc
+                                   end, FirstEntry, Tab),
+
                     if
-                        SelfId < Next#leaf_set_entry.id ->
+                        SelfId < Next#dht_leaf_set.id ->
                             self;
                         true ->
                             {has, Next}

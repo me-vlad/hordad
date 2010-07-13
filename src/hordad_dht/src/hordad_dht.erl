@@ -230,7 +230,7 @@ route(Msg, Key, Ref, IP) ->
         % We've got Id in our leaf set. Forward msg to it
         {has, Next} ->
             hordad_log:info(?MODULE, "~p: forwarding to ~p (leaf)",
-                            [Ref, Next#leaf_set_entry.ip]),
+                            [Ref, Next#dht_leaf_set.ip]),
 
             forward(Msg, Key, Ref, Next, IP);
         % No node in leaf set, go on with routing
@@ -238,7 +238,7 @@ route(Msg, Key, Ref, IP) ->
             case hordad_dht_route_table:get_node(Key) of
                 {ok, Next} ->
                     hordad_log:info(?MODULE, "~p: forwarding to ~p (route)",
-                                    [Ref, Next#leaf_set_entry.ip]),
+                                    [Ref, Next#dht_leaf_set.ip]),
 
                     forward(Msg, Key, Ref, Next, IP);
                 undefined ->
@@ -253,12 +253,12 @@ join_dht(EntryPoint) ->
     ok.
 
 %% @doc Forward message to another node
-forward(Msg, Key, Ref, #leaf_set_entry{ip=NextIP}, IP) ->
+forward(Msg, Key, Ref, #dht_leaf_set{ip=NextIP}, IP) ->
     send_engine({route, Msg, Key, Ref, IP}, NextIP).
 
 %% @doc Workhouse for deliver/4
 do_deliver(get, Key, Ref, IP) ->
-    Val = hordad_dht_storage:lookup(Key, undefined),
+    {ok, Val} = hordad_dht_storage:lookup(Key, undefined),
     send_engine({get_result, Val, Ref}, IP);
 
 do_deliver({set, Value}, Key, Ref, IP) ->
