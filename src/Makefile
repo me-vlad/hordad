@@ -5,7 +5,7 @@ export ERL_LIBS=$(shell pwd):/usr/lib
 APPS := $(wildcard hordad_*) contrib
 REL_FILE := hordad.rel
 
-.PHONY: apps $(APPS) emake clean boot
+.PHONY: apps $(APPS) emake clean boot typecheck
 
 apps: $(APPS) boot
 
@@ -13,9 +13,11 @@ emake:
 	@for app in $(APPS); do \
 		cd $$app && \
 		make emake && \
-		erl -make && \
 		cd ..; \
 	 done
+
+typecheck: $(APPS)
+	dialyzer -r hordad_*
 
 $(APPS):
 	@export ERL_LIBS=$(ELIBS)
@@ -32,3 +34,4 @@ clean:
 	@for app in $(APPS); do \
 	   make -C $$app clean; \
 	done
+
