@@ -11,6 +11,8 @@
 
 -export([start_link/0]).
 
+-define(DEFAULT_INTERVAL, 30).
+
 %% @doc Start master supervisor
 -spec(start_link() -> {ok, pid()}).
 
@@ -18,10 +20,9 @@ start_link() ->
     {ok, spawn_link(fun loop/0)}.
 
 loop() ->
-    [RawInterval, Applications] =
-        hordad_lcf:get_vars([{hordad_master, interval},
-                             {hordad_master, applications}]),
-
+    RawInterval = hordad_lcf:get_var({hordad_master, interval},
+                                     ?DEFAULT_INTERVAL),
+    Applications = hordad_lcf:get_var({hordad_master, applications}),
     Interval = RawInterval * 1000,
 
     lists:foreach(

@@ -1,6 +1,7 @@
 # Application-level makefile template
 
 BEAMS: $(patsubst src/%.erl,ebin/%.beam, $(wildcard src/*.erl))
+TESTS: $(wildcard ebin/*_tests.beam)
 
 ERLC := erlc
 ERLC_FLAGS := -W5 +debug_info
@@ -18,6 +19,11 @@ emake:
 	@echo "{'src/*', [{outdir, \"ebin\"}, {i, \"./include\"}, debug_info, warn_export_all, warn_export_vars, warn_obsolete_guard, warn_unused_import]}." \
 	>> $(EMAKEFILE)
 	@erl -make
+
+test: $(BEAMS)
+	@for test in $(basename $(wildcard ebin/*_tests.beam)); do\
+		echo ">> " $$test "<<";\
+	done
 
 clean:
 	@rm -f ebin/*.beam

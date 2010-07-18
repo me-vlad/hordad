@@ -67,7 +67,13 @@ get_file(ssl, File) ->
 -spec(get_conf_file(conf_file_name()) -> {ok, string()} | invalid).
 
 get_conf_file(lcf) ->
-    {ok, filename:join([get_conf_dir(), ?CONST_CONF_LCF])};
+    % Check for overriding env var
+    case application:get_env(hordad_lcf, conf) of
+        {ok, Path} ->
+            {ok, Path};
+        undefined ->
+            {ok, filename:join([get_conf_dir(), ?CONST_CONF_LCF])}
+    end;
 get_conf_file(_) ->
     invalid.
 

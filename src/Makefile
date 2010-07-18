@@ -5,7 +5,7 @@ export ERL_LIBS=$(shell pwd):/usr/lib
 APPS := $(wildcard hordad_*) contrib
 REL_FILE := hordad.rel
 
-.PHONY: apps $(APPS) emake clean boot typecheck
+.PHONY: apps $(APPS) emake clean boot typecheck test
 
 apps: $(APPS) boot
 
@@ -27,6 +27,9 @@ boot:
 	./tools/rel_versions.py ./$(REL_FILE)
 	erl -noinput -eval \
 	'systools:make_script("hordad", [local, {path, ["*/ebin"]}]), halt(0).'
+
+test: $(APPS)
+	make -c $@ test
 
 clean:
 	@rm -f hordad.boot hordad.script
