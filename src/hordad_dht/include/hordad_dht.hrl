@@ -10,11 +10,14 @@
 -ifndef(HORDAD_DHT_HRL).
 -define(HORDAD_DHT_HRL, true).
 
--record(dht_leaf_set, {
+-record(dht_node, {
           id, % Node ID
           ip  % Node IP
          }).
 
+
 -record(dht_route, {
+          key,  % {prefix, n+1}
+          node  % dht_node{}
          }).
 -endif.

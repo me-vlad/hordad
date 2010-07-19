@@ -43,19 +43,19 @@ start_link() ->
 %%====================================================================
 
 %% @doc Get local configuration parameter value
--spec(get_var(tuple()) -> Val :: any() | undefined).
+-spec(get_var(any()) -> Val :: any() | undefined).
 
 get_var(Var) ->
     gen_server:call(?MODULE, {get_var, Var, undefined}).
 
 %% @doc Get local configuration parameter value or default if undefined
--spec(get_var(tuple(), any()) -> Val :: any() | any()).
+-spec(get_var(any(), any()) -> Val :: any() | any()).
 
 get_var(Var, Default) ->
     gen_server:call(?MODULE, {get_var, Var, Default}).
 
 %% @doc Get a list of parameters at once
--spec(get_vars([tuple()]) -> [any()]).
+-spec(get_vars([any()]) -> [any()]).
              
 get_vars(Vars) ->
     [get_var(Var) || Var <- Vars].
@@ -67,8 +67,7 @@ get_vars(Vars, Default) ->
     [get_var(Var, Default) || Var <- Vars].
 
 %% @doc Get proplist of all local variables
--type(lcf_entry() :: {Var :: atom(), Val :: any()}).
--spec(get_all() -> [lcf_entry()]).
+-spec(get_all() -> [any()]).
 
 get_all() ->
     gen_server:call(?MODULE, get_all).

@@ -230,19 +230,40 @@ route(Msg, Key, Ref, IP) ->
         % We've got Id in our leaf set. Forward msg to it
         {has, Next} ->
             hordad_log:info(?MODULE, "~p: forwarding to ~p (leaf)",
-                            [Ref, Next#dht_leaf_set.ip]),
+                            [Ref, Next#dht_node.ip]),
 
             forward(Msg, Key, Ref, Next, IP);
         % No node in leaf set, go on with routing
         false ->
             case hordad_dht_route_table:get_node(Key) of
+                {error,  Reason} ->
+                    hordad_log:error(?MODULE,
+                                     "Error checking route table: ~9999p",
+                                     [Reason]),
+                    ok;
                 {ok, Next} ->
                     hordad_log:info(?MODULE, "~p: forwarding to ~p (route)",
-                                    [Ref, Next#dht_leaf_set.ip]),
+                                    [Ref, Next#dht_node.ip]),
 
                     forward(Msg, Key, Ref, Next, IP);
                 undefined ->
-                    rare_case
+                    Prefix = hordad_dht_lib:shared_prefix(
+                               Key, hordad_lcf:get_var({hordad_dht, node_id})),
+
+                    Ids = hordad_dht_leaf_set:get_all_nodes() ++
+                        hordad_dht_route_table:get_all_nodes() ++ 
+                        hordad_dht_neighborhood_set:get_all_nodes(),
+                    
+                    Next = lists:foldl(
+                             fun(#dht_node{id=Id}, Acc) ->
+                                     P = hordad_dht_lib:shared_prefix(Id, Key),
+                                     
+                                     if
+                                         P >= Prefix andalso
+                                         true ->
+                                             todo
+                                     end
+                             end, [], Ids)
             end
     end.
 
@@ -253,7 +274,7 @@ join_dht(EntryPoint) ->
     ok.
 
 %% @doc Forward message to another node
-forward(Msg, Key, Ref, #dht_leaf_set{ip=NextIP}, IP) ->
+forward(Msg, Key, Ref, #dht_node{ip=NextIP}, IP) ->
     send_engine({route, Msg, Key, Ref, IP}, NextIP).
 
 %% @doc Workhouse for deliver/4

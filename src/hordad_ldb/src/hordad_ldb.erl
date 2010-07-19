@@ -25,10 +25,23 @@
          last/1
         ]).
 
+-define(DEFAULT_OVERRIDE, false).
+
 %% @doc Init database
 -spec(init_db() -> ok | {error, any()}).
 
 init_db() ->
+    application:set_env(mnesia, dir,
+                        hordad_lcf:get_var({hordad_ldb, db_dir})),
+
+    case hordad_lcf:get_var({hordad_ldb, override_existing},
+                            ?DEFAULT_OVERRIDE) of
+        true ->
+            mnesia:delete_schema([node()]);
+        false ->
+            ok
+    end,
+
     try
         case mnesia:system_info(use_dir) of
             true ->
@@ -68,7 +81,7 @@ start_db() ->
     end.
 
 %% @doc Write record to database
--spec(write(record()) -> ok | {error, any()}).
+-spec(write(tuple()) -> ok | {error, any()}).
              
 write(Record) ->
     run_transaction(fun() ->
@@ -84,7 +97,7 @@ delete(Table, Key) ->
                     end).
 
 %% @doc Get all records with provided key from database
--spec(read(atom(), any()) -> {ok, [record()]} | {error, any()}).
+-spec(read(atom(), any()) -> {ok, [tuple()]} | {error, any()}).
 
 read(Table, Key) ->
     run_transaction(fun() ->
@@ -92,7 +105,7 @@ read(Table, Key) ->
                     end).
 
 %% @doc Get all records with provided key from database or return default value
--spec(read(atom(), any(), any()) -> {ok, [record()]} | {error, any()}).
+-spec(read(atom(), any(), any()) -> {ok, [tuple()]} | {error, any()}).
 
 read(Table, Key, Default) ->
     case read(Table, Key) of
@@ -118,7 +131,7 @@ create_table(Table, Attrs) ->
     end.
 
 %% @doc Match objects by pattern
--spec(match(record()) -> {ok, [record()]} | {error, any()}).
+-spec(match(tuple()) -> {ok, [tuple()]} | {error, any()}).
 
 match(Pattern) ->
     run_transaction(fun() ->

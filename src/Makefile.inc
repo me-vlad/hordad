@@ -20,11 +20,6 @@ emake:
 	>> $(EMAKEFILE)
 	@erl -make
 
-test: $(BEAMS)
-	@for test in $(basename $(wildcard ebin/*_tests.beam)); do\
-		echo ">> " $$test "<<";\
-	done
-
 clean:
 	@rm -f ebin/*.beam
 	@rm -f $(EMAKEFILE)

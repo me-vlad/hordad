@@ -89,7 +89,7 @@ start_link() ->
 -spec(level_allowed(log_level()) -> boolean()).
              
 level_allowed(Level) ->
-    case hordad_lcf:get_var({hordad_log, levels}, []) of
+    case hordad_lcf:get_var({hordad_log, levels}, all) of
         all ->
             true;
         List ->
