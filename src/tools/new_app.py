@@ -3,7 +3,7 @@
 import os
 import time
 
-SUBDIRS = ["ebin", "include", "priv", "src"]
+SUBDIRS = ["ebin", "include", "priv", "src", "tests"]
 
 APP_RES_T = """\
 {application, %(app)s,
@@ -120,6 +120,14 @@ MAKEFILE_T = """\
 include ../Makefile.inc
 """
 
+LCF_CONF_T = """\
+%%%%%% Test configuration
+{{hordad_master, applications}, [ %(app)s, hordad_tests ]}.
+{{hordad_ldb, db_dir}, "/tmp/hordad-test"}.
+{{hordad_ldb, tables}, [ %(app)s ]}.
+{{hordad_ldb, override_existing}, true}.
+"""
+
 def error(msg):
     print "***ERROR: %s" % msg
 
@@ -157,6 +165,11 @@ f.close()
 # Makefile
 f = open(os.path.join(app, "Makefile"), "w")
 f.write(MAKEFILE_T % locals())
+f.close()
+
+# lcf.conf
+f = open(os.path.join(app, "tests", "lcf.conf"), "w")
+f.write(LCF_CONF_T % locals())
 f.close()
 
 print("Done.")
