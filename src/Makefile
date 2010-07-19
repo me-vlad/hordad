@@ -1,4 +1,12 @@
 # System makefile
+#
+# Max E. Kuznecov <mek@mek.uz.ua>
+#
+# Possible targets:
+# all: Build using regular make
+# emake: Build using emake (significally faster)
+# typecheck: Run dialyzer static type analysis checks
+# tests: Run application tests 
 
 export ERL_LIBS=$(shell pwd):/usr/lib
 
@@ -6,9 +14,9 @@ START_TESTS = ./start-tests.sh
 APPS := $(wildcard hordad_*) contrib
 REL_FILE := hordad.rel
 
-.PHONY: apps $(APPS) emake doemake clean boot typecheck tests
+.PHONY: all $(APPS) emake doemake clean boot typecheck tests
 
-apps: $(APPS) boot
+all: $(APPS) boot
 
 emake: doemake boot
 
@@ -28,7 +36,6 @@ tests: $(APPS) boot
 	done
 
 $(APPS):
-	@export ERL_LIBS=$(ELIBS)
 	make -C $@
 
 boot:
