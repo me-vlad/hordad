@@ -212,10 +212,12 @@ poll(Poller, Ref, Parent) ->
                                [Poller, E, erlang:get_stacktrace()]),
 
             Parent ! {Ref, Poller, self(), error}
-    end.
+    end,
+    
+    ok.
 
 %% @doc Wait for every poller session completes
--spec(wait_for_reports([ip()], dict()) -> dict()).
+-spec(wait_for_reports([ip()], dict()) -> dict() | timeout).
 
 wait_for_reports([], Dict) ->
     Dict;
