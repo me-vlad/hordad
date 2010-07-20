@@ -32,7 +32,7 @@ set_var_test() ->
     ?assertEqual(custom_value, hordad_lcf:get_var({hordad_lcf, custom})).
    
 reload_test() ->
-    % 5 base plus custom set
+    % 6 base plus custom set
     ?assertEqual(7, length(hordad_lcf:get_all())),
     ?assertEqual(ok, hordad_lcf:reload()),
     ?assertEqual(6, length(hordad_lcf:get_all())).
