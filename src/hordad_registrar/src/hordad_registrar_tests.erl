@@ -3,7 +3,7 @@
 %%% Author  : Max E. Kuznecov <mek@mek.uz.ua>
 %%% Description: Tests for hordad_registrar
 %%%
-%%% Created : 2010-02-08 by Max E. Kuznecov <mek@mek.uz.ua>
+%%% Created : 2010-07-20 by Max E. Kuznecov <mek@mek.uz.ua>
 %%% @copyright 2009-2010 Server Labs
 %%% -------------------------------------------------------------------
 
@@ -11,14 +11,18 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-f_test() ->
-    CB = {test_module, test_function},
-    
-    ?assertEqual(ok, hordad_registrar:register("test", CB)),
-    ?assertEqual(CB, hordad_registrar:get_cb("test")),
-    ?assertEqual(undefined, hordad_registrar:get_cb("wtf_test")),
-    
-    ?assertEqual(ok, hordad_registrar:unregister("test")),
-    ?assertEqual(undefined, hordad_registrar:get_cb("test")).
+registrar_test() ->
+    Tag = "test",
+    CB = {?MODULE, test_cb, [some_arg]},
 
-    
+    ?assertEqual(undefined, hordad_registrar:get_cb(Tag)),
+    ?assertError(function_clause, 
+                 hordad_registrar:register(Tag, wtf)),
+    ?assertEqual(ok,
+                 hordad_registrar:register(Tag, CB)),
+    ?assertEqual(CB, hordad_registrar:get_cb(Tag)),
+
+    ?assertEqual([{Tag, CB}], hordad_registrar:registered()),
+    ?assertEqual(ok, hordad_registrar:unregister(Tag)),
+    ?assertEqual([], hordad_registrar:registered()),
+    ?assertEqual(undefined, hordad_registrar:get_cb(Tag)).

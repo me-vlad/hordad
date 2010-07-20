@@ -51,7 +51,8 @@ start_link() ->
 %% @doc Register new tag handler
 -spec(register(tag(), handler_cb()) -> ok | {error, string()}).
 
-register(Tag, CB) ->
+register(Tag, {M, F, A}=CB) when is_atom(M) andalso
+                            is_atom(F) andalso is_list(A) ->
     gen_server:call(?MODULE, {register, Tag, CB}).
 
 %% @doc Unregister tag handler
@@ -61,6 +62,8 @@ unregister(Tag) ->
     gen_server:call(?MODULE, {unregister, Tag}).
 
 %% @doc Get list of registered handlers
+-spec(registered() -> [{tag(), handler_cb()}]).
+
 registered() ->
     gen_server:call(?MODULE, registered).
 
@@ -104,11 +107,17 @@ handle_call({unregister, Tag}, _From, Table) ->
 
     {reply, ok, Table};
 handle_call(registered, _From, Table) ->
-    {reply, hordad_ldb:match(#registrar{tag='_', cb='_'}), Table};
+    {ok, RawData} = hordad_ldb:match(#registrar{tag='_', cb='_'}),
+
+    Data = lists:foldl(fun(#registrar{tag=Tag, cb=CB}, Acc) ->
+                               [{Tag, CB} | Acc]
+                       end, [], RawData),
+
+    {reply, Data, Table};
 handle_call({get_cb, Tag}, _From, Table) ->
-    {ok, Reply} = hordad_ldb:read(Table, Tag),
+    {ok, RawReply} = hordad_ldb:read(Table, Tag),
     
-    case Reply of
+    Reply = case RawReply of
         [] ->
             undefined;
         [#registrar{cb=CB}] ->
