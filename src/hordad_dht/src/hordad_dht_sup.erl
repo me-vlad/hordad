@@ -52,16 +52,10 @@ init([]) ->
              {hordad_dht_neighborhood_set, start_link,[]},
              permanent, 2000, worker, [hordad_dht_neighborhood_set]},
 
-    Route = {hordad_dht_route_table, {hordad_dht_route_table, start_link,[]},
-             permanent, 2000, worker, [hordad_dht_route_table]},
-
-    Storage = {hordad_dht_storage, {hordad_dht_storage, start_link,[]},
-               permanent, 2000, worker, [hordad_dht_storage]},
-
     Srv = {hordad_dht, {hordad_dht, start_link,[]},
            permanent, 2000, worker, [hordad_dht]},
 
-    {ok, {{one_for_one, 5, 1}, [Meta, LeafSet, NHSet, Route, Storage, Srv]}}.
+    {ok, {{one_for_one, 5, 1}, [Meta, LeafSet, NHSet, Srv]}}.
 
 %%====================================================================
 %% Internal functions
