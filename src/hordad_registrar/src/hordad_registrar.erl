@@ -26,9 +26,15 @@
          terminate/2, code_change/3]).
 
 -define(TABLE, registrar).
+-define(is_callback(CB),
+        is_function(CB) orelse (
+                          is_tuple(CB) andalso
+                          is_atom(element(1,CB)) andalso
+                          is_atom(element(2, CB)) andalso
+                          is_list(element(3, CB)))).
 
 -record(registrar, {tag, % Handler tag
-                    cb   % Callback - {Module, Function, Args}
+                    cb   % Callback - {Module, Function, Args} | fun()
                    }).
 
 %%====================================================================
@@ -46,13 +52,13 @@ start_link() ->
 %%====================================================================
 
 -type(tag() :: list()).
--type(handler_cb() :: {Module :: atom(), Fun :: atom(), Args :: [any()]}).
+-type(handler_cb() :: {Module :: atom(), Fun :: atom(), Args :: [any()]} |
+                      function()).
 
 %% @doc Register new tag handler
 -spec(register(tag(), handler_cb()) -> ok | {error, string()}).
 
-register(Tag, {M, F, A}=CB) when is_atom(M) andalso
-                            is_atom(F) andalso is_list(A) ->
+register(Tag, CB) when ?is_callback(CB) ->
     gen_server:call(?MODULE, {register, Tag, CB}).
 
 %% @doc Unregister tag handler

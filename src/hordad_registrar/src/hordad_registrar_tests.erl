@@ -26,3 +26,15 @@ registrar_test() ->
     ?assertEqual(ok, hordad_registrar:unregister(Tag)),
     ?assertEqual([], hordad_registrar:registered()),
     ?assertEqual(undefined, hordad_registrar:get_cb(Tag)).
+
+fun_cb_test() ->
+    Tag = "fun_test",
+    FunCB = fun(_) ->
+                    ok
+            end,
+
+    ?assertEqual(ok, hordad_registrar:register(Tag, FunCB)),
+    ?assertEqual([{Tag, FunCB}], hordad_registrar:registered()),
+    ?assertEqual(ok, hordad_registrar:unregister(Tag)),
+    ?assertEqual([], hordad_registrar:registered()),
+    ?assertEqual(undefined, hordad_registrar:get_cb(Tag)).

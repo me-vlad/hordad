@@ -242,6 +242,8 @@ router(Socket) ->
             case hordad_registrar:get_cb(Tag) of
                 undefined ->
                     Error("Undefined handler for tag ~9999p", [Tag]);
+                Fun when is_function(Fun) ->
+                    Fun(Socket);
                 {Module, Fun, Args} ->
                     apply(Module, Fun, [Socket | Args])
             end;
