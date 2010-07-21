@@ -11,6 +11,7 @@
 
 -export([
          gen_id/1,
+         id_str2num/1,
          shared_prefix/2
         ]).
 
@@ -23,6 +24,12 @@ gen_id(Data) ->
     lists:flatten(
       [io_lib:format("~2.16.0b", [N]) ||
           <<N>> <= crypto:sha(term_to_binary(Data))]).
+
+%% @doc Convert string id to numerical equivalent
+-spec(id_str2num(string()) -> integer()).
+
+id_str2num(Id) when is_list(Id) ->
+    httpd_util:hexlist_to_integer(Id).
 
 %% @doc Get length of shared prefix of two keys
 shared_prefix(A, B) ->

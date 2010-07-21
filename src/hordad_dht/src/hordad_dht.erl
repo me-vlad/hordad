@@ -34,7 +34,7 @@
 -define(SERVICE_TAG, "dht").
 -define(SERVER, ?MODULE).
 
--define(is_callback(CB), is_pid(CB) orelse 
+-define(is_callback(CB), is_pid(CB) orelse
                          is_function(CB) orelse
                          (is_tuple(CB) andalso
                           tuple_size(CB) == 3 andalso
@@ -75,7 +75,7 @@ get_sync(Key) ->
         end,
 
     spawn(F),
-    
+
     receive
         {get_result, Value} ->
             {ok, Value};
@@ -100,7 +100,7 @@ set_sync(Key, Value) ->
         end,
 
     spawn(F),
-    
+
     receive
         {set_result, Value} ->
             {ok, Value};
@@ -247,23 +247,33 @@ route(Msg, Key, Ref, IP) ->
 
                     forward(Msg, Key, Ref, Next, IP);
                 undefined ->
-                    Prefix = hordad_dht_lib:shared_prefix(
-                               Key, hordad_lcf:get_var({hordad_dht, node_id})),
+                    NodeId = hordad_lcf:get_var({hordad_dht, node_id}),
+                    Prefix = hordad_dht_lib:shared_prefix(Key, NodeId),
+                    NodeIdNum = hordad_dht_lib:id_str2num(NodeId),
+                    KeyNum = hordad_dht_lib:id_str2num(Key),
 
                     Ids = hordad_dht_leaf_set:get_all_nodes() ++
-                        hordad_dht_route_table:get_all_nodes() ++ 
+                        hordad_dht_route_table:get_all_nodes() ++
                         hordad_dht_neighborhood_set:get_all_nodes(),
-                    
+
+                    % Check for the first node with prefix equal to
+                    % one of current node but numerically greater
                     Next = lists:foldl(
                              fun(#dht_node{id=Id}, Acc) ->
                                      P = hordad_dht_lib:shared_prefix(Id, Key),
-                                     
+                                     IdNum = hordad_dht_lib:id_str2num(Id),
+
                                      if
                                          P >= Prefix andalso
+                                         abs(IdNum - KeyNum) <
+                                         abs(NodeIdNum - KeyNum) ->
+                                             Id;
                                          true ->
-                                             todo
+                                             Acc
                                      end
-                             end, [], Ids)
+                             end, NodeId, Ids),
+
+                    forward(Msg, Key, Ref, Next, IP)
             end
     end.
 
@@ -292,11 +302,11 @@ do_init_request(Msg, Key, CB, State) ->
     Ref = make_ref(),
     IP = hordad_lcf:get_var({hordad_dht, node_ip}),
 
-    % 2. Spawn routing proc
-    spawn(?MODULE, route, [Msg, Key, Ref, IP]),
-
-    % 3. Spawn watcher proc as well
+    % 2. Spawn watcher proc
     Watcher = spawn(?MODULE, request_watcher, [Ref]),
+
+    % 3. Spawn routing proc
+    spawn(?MODULE, route, [Msg, Key, Ref, IP]),
 
     dict:store(Ref, {CB, Watcher}, State).
 
@@ -309,6 +319,8 @@ do_complete_request(Msg, Dict) ->
                          {RefOrig, {get_result, Value}};
                      {set_result, Value, RefOrig} ->
                          {RefOrig, {set_result, Value}};
+                     {error, Reason, RefOrig} ->
+                         {RefOrig, {error, Reason}};
                      {timeout, RefOrig} ->
                          {RefOrig, {error, timeout}}
                  end,
@@ -358,7 +370,7 @@ run_callback({Module, Fun, Args}, Value) ->
 
 %% @doc Check if node id is already set and if not, set it
 -spec(set_node_id() -> ok).
-    
+
 set_node_id() ->
     case hordad_lcf:get_var({hordad_dht, node_id}, undefined) of
         undefined ->
@@ -376,7 +388,7 @@ set_node_id() ->
 
             hordad_lcf:set_var({hordad_dht, node_id}, NodeId)
     end,
-    
+
     ok.
 
 %% @doc Send a message to remote node
