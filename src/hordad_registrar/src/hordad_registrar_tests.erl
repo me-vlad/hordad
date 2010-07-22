@@ -38,3 +38,17 @@ fun_cb_test() ->
     ?assertEqual(ok, hordad_registrar:unregister(Tag)),
     ?assertEqual([], hordad_registrar:registered()),
     ?assertEqual(undefined, hordad_registrar:get_cb(Tag)).
+
+override_test() ->
+    Tag = "override",
+    F1 = fun(_) ->
+                 ok
+         end,
+    F2 = fun(_) ->
+                 ok
+         end,
+
+    ?assertEqual(undefined, hordad_registrar:get_cb(Tag)),
+    ?assertEqual(ok, hordad_registrar:register(Tag, F1)),
+    ?assertEqual(ok, hordad_registrar:register(Tag, F2)),
+    ?assertEqual(F2, hordad_registrar:get_cb(Tag)).
