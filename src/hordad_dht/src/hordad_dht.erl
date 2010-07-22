@@ -247,9 +247,9 @@ route(Msg, Key, Ref, IP) ->
 
                     forward(Msg, Key, Ref, Next, IP);
                 undefined ->
-                    NodeId = hordad_lcf:get_var({hordad_dht, node_id}),
-                    Prefix = hordad_dht_lib:shared_prefix(Key, NodeId),
-                    NodeIdNum = hordad_dht_lib:id_str2num(NodeId),
+                    Node = hordad_lcf:get_var({hordad_dht, node}),
+                    Prefix = hordad_dht_lib:shared_prefix(Key,
+                                                          Node#dht_node.id),
                     KeyNum = hordad_dht_lib:id_str2num(Key),
 
                     Ids = hordad_dht_leaf_set:get_all_nodes() ++
@@ -259,19 +259,18 @@ route(Msg, Key, Ref, IP) ->
                     % Check for the first node with prefix equal to
                     % one of current node but numerically greater
                     Next = lists:foldl(
-                             fun(#dht_node{id=Id}, Acc) ->
+                             fun(#dht_node{id=Id, id_num=IdNum}=Entry, Acc) ->
                                      P = hordad_dht_lib:shared_prefix(Id, Key),
-                                     IdNum = hordad_dht_lib:id_str2num(Id),
 
                                      if
                                          P >= Prefix andalso
                                          abs(IdNum - KeyNum) <
-                                         abs(NodeIdNum - KeyNum) ->
-                                             Id;
+                                         abs(Node#dht_node.id_num - KeyNum) ->
+                                             Entry;
                                          true ->
                                              Acc
                                      end
-                             end, NodeId, Ids),
+                             end, Node, Ids),
 
                     forward(Msg, Key, Ref, Next, IP)
             end
@@ -322,7 +321,14 @@ do_complete_request(Msg, Dict) ->
                      {error, Reason, RefOrig} ->
                          {RefOrig, {error, Reason}};
                      {timeout, RefOrig} ->
-                         {RefOrig, {error, timeout}}
+                         {RefOrig, {error, timeout}};
+                     _ ->
+                         hordad_log:warning(
+                           ?MODULE,
+                           "Unable to complete request ~9999p:"
+                           "invalid request", [Msg]),
+                         
+                         {invalid, undefined}
                  end,
 
     %% Locate stored request
@@ -386,7 +392,13 @@ set_node_id() ->
                              Id
                      end,
 
-            hordad_lcf:set_var({hordad_dht, node_id}, NodeId)
+            hordad_lcf:set_var({hordad_dht, node_id}, NodeId),
+            hordad_lcf:set_var({hordad_dht, node},
+                               #dht_node{
+                                 id=NodeId,
+                                 id_num=hordad_dht_lib:id_str2num(NodeId),
+                                 ip=hordad_lcf:get_var({hordad_dht, node_ip})})
+            
     end,
 
     ok.

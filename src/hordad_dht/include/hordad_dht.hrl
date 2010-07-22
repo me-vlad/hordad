@@ -11,10 +11,10 @@
 -define(HORDAD_DHT_HRL, true).
 
 -record(dht_node, {
-          id, % Node ID
-          ip  % Node IP
+          id,     % Node ID (string)
+          id_num, % Node ID (integer)
+          ip      % Node IP
          }).
-
 
 -record(dht_route, {
           key,  % {prefix, n+1}

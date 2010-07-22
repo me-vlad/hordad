@@ -11,7 +11,9 @@
 -include("hordad_dht.hrl").
 
 %% API
--export([get_node/1]).
+-export([get_node/1,
+         get_all_nodes/0
+        ]).
 
 -export([get_ldb_tables/0]).
 
@@ -33,6 +35,15 @@ get_node(Key) ->
         E ->
             E
     end.
+
+%% @doc Return list of all nodes stored in routing table
+-spec(get_all_nodes() -> [#dht_node{}]).
+
+get_all_nodes() ->
+    hordad_ldb:foldl(
+      fun(#dht_route{node=Node}, Acc) ->
+              [Node | Acc]
+      end, [], ?TABLE).
 
 %% @doc hordad_ldb table info callback.
 -spec(get_ldb_tables() -> {Name :: atom(), Attrs :: [{atom(), any()}]}).
