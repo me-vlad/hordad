@@ -3,8 +3,8 @@
 %%% Author  : Max E. Kuznecov <mek@mek.uz.ua>
 %%% Description: Hordad DHT module
 %%%
-%%% Created : 2010-02-03 by Max E. Kuznecov <mek@mek.uz.ua>
-%%% @copyright 2009-2010 Server Labs
+%%% Created : 2010-02-03
+%%% @copyright 2009-2010 Max E. Kuznecov
 %%% -------------------------------------------------------------------
 
 -module(hordad_dht).
@@ -154,7 +154,7 @@ init([]) ->
                  join_dht(EntryPoint)
          end,
 
-    {ok, dict:new()}.
+    {ok, ok}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -167,13 +167,13 @@ init([]) ->
 %%--------------------------------------------------------------------
 
 handle_call({get, Key, CB}, _From, State) ->
-    {reply, ok, do_init_request(get, Key, CB, State)};
+    {reply, do_init_request(get, Key, CB), State};
 handle_call({set, Key, Value, CB}, _From, State) ->
-    {reply, ok, do_init_request({set, Value}, Key, CB, State)};
+    {reply, do_init_request({set, Value}, Key, CB), State};
 handle_call({deliver, Msg, Key, Ref, IP}, _From, State) ->
     {reply, do_deliver(Msg, Key, Ref, IP), State};
 handle_call({complete_request, Msg}, _From, State) ->
-    {reply, ok, do_complete_request(Msg, State)}.
+    {reply, do_complete_request(Msg), State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -296,23 +296,22 @@ do_deliver({set, Value}, Key, Ref, IP) ->
     send_engine({set_result, ok, Ref}, IP).
 
 %% @doc Init new request
-do_init_request(Msg, Key, CB, State) ->
-    % 1. Store request in dict
+-spec(do_init_request(any(), string(), callback()) -> ok).
+
+do_init_request(Msg, Key, CB) ->
     Ref = make_ref(),
     IP = hordad_lcf:get_var({hordad_dht, node_ip}),
 
-    % 2. Spawn watcher proc
     Watcher = spawn(?MODULE, request_watcher, [Ref]),
 
-    % 3. Spawn routing proc
     spawn(?MODULE, route, [Msg, Key, Ref, IP]),
 
-    dict:store(Ref, {CB, Watcher}, State).
+    hordad_dht_meta:insert(Ref, {CB, Watcher}).
 
 %% @doc Perform request completion
--spec(do_complete_request(any(), dict()) -> dict()).
+-spec(do_complete_request(any()) -> ok).
 
-do_complete_request(Msg, Dict) ->
+do_complete_request(Msg) ->
     {Ref, Val} = case Msg of
                      {get_result, Value, RefOrig} ->
                          {RefOrig, {get_result, Value}};
@@ -327,26 +326,27 @@ do_complete_request(Msg, Dict) ->
                            ?MODULE,
                            "Unable to complete request ~9999p:"
                            "invalid request", [Msg]),
-                         
+
                          {invalid, undefined}
                  end,
 
     %% Locate stored request
-    case dict:find(Ref, Dict) of
-        {ok, {CB, Watcher}} ->
+    case hordad_dht_meta:lookup(Ref) of
+        {CB, Watcher} ->
             hordad_log:info(?MODULE,
                              "~p: completing request: ~9999p", [Ref, Val]),
 
             Watcher ! completed,
             run_callback(CB, Val),
 
-            dict:erase(Ref, Dict);
-        erorr ->
+            hordad_dht_meta:delete(Ref);
+        undefined ->
             hordad_log:warning(?MODULE,
                                "Unable to complete request - "
-                               "not in queue: ~9999p.", [Msg]),
-            Dict
-    end.
+                               "not in queue: ~9999p.", [Msg])
+    end,
+
+    ok.
 
 %% @doc Request watcher
 request_watcher(Ref) ->
@@ -378,28 +378,29 @@ run_callback({Module, Fun, Args}, Value) ->
 -spec(set_node_id() -> ok).
 
 set_node_id() ->
-    case hordad_lcf:get_var({hordad_dht, node_id}, undefined) of
-        undefined ->
-            NodeId = case hordad_dht_meta:lookup(node_id) of
+    NodeId = case hordad_lcf:get_var({hordad_dht, node_id}, undefined) of
+                 undefined ->
+                     case hordad_dht_meta:lookup(node_id) of
                          [Id] ->
                              Id;
                          undefined ->
                              % No ID yet, generate new one
                              Id = hordad_dht_lib:gen_id(
                                     hordad_lcf:get_var({hordad_dht, node_ip})),
-                             hordad_dht_meta:insert({node_id, Id}),
+                             hordad_dht_meta:insert(node_id, Id),
 
                              Id
-                     end,
+                     end;
+                 Id ->
+                     Id
+             end,
 
-            hordad_lcf:set_var({hordad_dht, node_id}, NodeId),
-            hordad_lcf:set_var({hordad_dht, node},
-                               #dht_node{
-                                 id=NodeId,
-                                 id_num=hordad_dht_lib:id_str2num(NodeId),
-                                 ip=hordad_lcf:get_var({hordad_dht, node_ip})})
-            
-    end,
+    hordad_lcf:set_var({hordad_dht, node_id}, NodeId),
+    hordad_lcf:set_var({hordad_dht, node},
+                       #dht_node{
+                         id=NodeId,
+                         id_num=hordad_dht_lib:id_str2num(NodeId),
+                         ip=hordad_lcf:get_var({hordad_dht, node_ip})}),
 
     ok.
 
