@@ -4,7 +4,7 @@
 #
 # Possible targets:
 # all: Build using regular make
-# emake: Build using emake (significally faster)
+# emake: Build using emake (significantly faster)
 # typecheck: Run dialyzer static type analysis checks
 # tests: Run application tests 
 
