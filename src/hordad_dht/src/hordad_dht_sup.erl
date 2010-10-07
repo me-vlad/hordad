@@ -42,9 +42,6 @@ start_link() ->
 %% specifications.
 %%--------------------------------------------------------------------
 init([]) ->
-    Meta = {hordad_dht_meta, {hordad_dht_meta, start_link,[]},
-            permanent, 2000, worker, [hordad_dht_meta]},
-
     LeafSet = {hordad_dht_leaf_set, {hordad_dht_leaf_set, start_link,[]},
                permanent, 2000, worker, [hordad_dht_leaf_set]},
 
@@ -55,7 +52,7 @@ init([]) ->
     Srv = {hordad_dht, {hordad_dht, start_link,[]},
            permanent, 2000, worker, [hordad_dht]},
 
-    {ok, {{one_for_one, 5, 1}, [Meta, LeafSet, NHSet, Srv]}}.
+    {ok, {{one_for_one, 5, 1}, [LeafSet, NHSet, Srv]}}.
 
 %%====================================================================
 %% Internal functions

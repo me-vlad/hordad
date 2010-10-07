@@ -32,6 +32,8 @@ id_str2num(Id) when is_list(Id) ->
     httpd_util:hexlist_to_integer(Id).
 
 %% @doc Get length of shared prefix of two keys
+-spec(shared_prefix(string(), string()) -> integer()).
+
 shared_prefix(A, B) ->
     shared_prefix(A, B, 0).
 

@@ -20,4 +20,5 @@
           key,  % {prefix, n+1}
           node  % dht_node{}
          }).
+
 -endif.

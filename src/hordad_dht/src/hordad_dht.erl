@@ -15,16 +15,13 @@
 
 %% API
 -export([start_link/0,
-         get_async/2,
-         get_sync/1,
-         set_async/3,
-         set_sync/2
+         get/1,
+         set/2
         ]).
 
 %% Internal stuff
 -export([service_handler/2,
-         route/4,
-         request_watcher/1
+         route/4
         ]).
 
 %% gen_server callbacks
@@ -33,16 +30,6 @@
 
 -define(SERVICE_TAG, "dht").
 -define(SERVER, ?MODULE).
-
--define(is_callback(CB), is_pid(CB) orelse
-                         is_function(CB) orelse
-                         (is_tuple(CB) andalso
-                          tuple_size(CB) == 3 andalso
-                          is_atom(element(1, CB)) andalso
-                          is_atom(element(2, CB)) andalso
-                          is_list(element(3, CB)))).
-
--type(callback() :: pid() | function() | tuple()).
 
 %%====================================================================
 %% API
@@ -54,67 +41,27 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-%% @doc Get key value. The function is asynchronous,
-%%      the CB argument can be either pid() or fun() or
-%%      tuple in format {Module, Fun, Args}.
-%%      The callback will be passed and argument/sent a message in form:
-%%      {get_result, Value} or {error, Reason}
--spec(get_async(any(), callback()) -> ok).
+%% @doc Get key value.
+-spec(get(any()) -> {error, timeout} | {error, any()} | any()).
 
-get_async(Key, CB) when ?is_callback(CB) ->
-    gen_server:call(?SERVER, {get, Key, CB}).
+get(Key) ->
+    call({get, Key}).
 
-%% @doc Synchronous version of get
--spec(get_sync(any()) -> {ok, any()} | {error, any()}).
+%% @doc Set key value.
+-spec(set(string(), any()) -> {error, timeout} | {error, any()} | any()).
 
-get_sync(Key) ->
-    Self = self(),
-
-    F = fun() ->
-                get_async(Key, Self)
-        end,
-
-    spawn(F),
-
-    receive
-        {get_result, Value} ->
-            {ok, Value};
-        {error, _}=E ->
-            E
-    end.
-
-%% @doc Set key value asynchronously. See get_async/2 description.
--spec(set_async(any(), any(), callback()) -> ok).
-
-set_async(Key, Value, CB) when ?is_callback(CB) ->
-    gen_server:call(?SERVER, {set, Key, Value, CB}).
-
-%% @doc Synchronous version of set
--spec(set_sync(any(), any()) -> {ok, any()} | {error, any()}).
-
-set_sync(Key, Value) ->
-    Self = self(),
-
-    F = fun() ->
-                set_async(Key, Value, Self)
-        end,
-
-    spawn(F),
-
-    receive
-        {set_result, Value} ->
-            {ok, Value};
-        {error, _}=E ->
-            E
-    end.
+set(Key, Value) ->
+    call({set, Key, Value}).
 
 %% @doc Deliver a message to this very node
 deliver(Msg, Key, Ref, IP) ->
     gen_server:call(?SERVER, {deliver, Msg, Key, Ref, IP}).
 
 %% @doc Perform request completion
-complete_request(Msg) ->
-    gen_server:call(?SERVER, {complete_request, Msg}).
+-spec(complete_request(reference(), any()) -> ok).
+
+complete_request(Ref, Val) ->
+    gen_server:call(?SERVER, {complete_request, Ref, Val}).
 
 %% ---------------------------------------------
 
@@ -123,10 +70,10 @@ complete_request(Msg) ->
 
 service_handler({route, Msg, Key, Ref, IP}, _Socket) ->
     route(Msg, Key, Ref, IP);
-service_handler({get_result, _Val, _Ref}=Msg, _Socket) ->
-    complete_request(Msg);
-service_handler({set_result, _Val, _Ref}=Msg, _Socket) ->
-    complete_request(Msg).
+service_handler({get_result, Val, Ref}, _Socket) ->
+    complete_request(Ref, Val);
+service_handler({set_result, Val, Ref}, _Socket) ->
+    complete_request(Ref, Val).
 
 %%====================================================================
 %% gen_server callbacks
@@ -154,7 +101,7 @@ init([]) ->
                  join_dht(EntryPoint)
          end,
 
-    {ok, ok}.
+    {ok, dict:new()}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -166,14 +113,18 @@ init([]) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 
-handle_call({get, Key, CB}, _From, State) ->
-    {reply, do_init_request(get, Key, CB), State};
-handle_call({set, Key, Value, CB}, _From, State) ->
-    {reply, do_init_request({set, Value}, Key, CB), State};
+handle_call({{get, Key}, Ref}, From, State) ->
+    {noreply, do_init_request(get, Key, Ref, From, State)};
+handle_call({{set, Key, Value}, Ref}, From, State) ->
+    {noreply, do_init_request({set, Value}, Key, Ref, From, State)};
 handle_call({deliver, Msg, Key, Ref, IP}, _From, State) ->
     {reply, do_deliver(Msg, Key, Ref, IP), State};
-handle_call({complete_request, Msg}, _From, State) ->
-    {reply, do_complete_request(Msg), State}.
+handle_call({cancel, Ref}, _From, State) ->
+    {reply, dict:erase(Ref, State)};
+handle_call({complete_request, Ref, Val}, _From, State) ->
+    NewState= do_complete_request(Ref, Val, State),
+
+    {reply, ok, NewState}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -296,83 +247,35 @@ do_deliver({set, Value}, Key, Ref, IP) ->
     send_engine({set_result, ok, Ref}, IP).
 
 %% @doc Init new request
--spec(do_init_request(any(), string(), callback()) -> ok).
+-spec(do_init_request(any(), string(), reference(), tuple(), dict())
+      -> dict()).
 
-do_init_request(Msg, Key, CB) ->
-    Ref = make_ref(),
+do_init_request(Msg, Key, Ref, From, State) ->
     IP = hordad_lcf:get_var({hordad_dht, node_ip}),
-
-    Watcher = spawn(?MODULE, request_watcher, [Ref]),
 
     spawn(?MODULE, route, [Msg, Key, Ref, IP]),
 
-    hordad_dht_meta:insert(Ref, {CB, Watcher}).
+    dict:store(Ref, From, State).
 
 %% @doc Perform request completion
--spec(do_complete_request(any()) -> ok).
+-spec(do_complete_request(reference(), any(), dict()) -> dict()).
 
-do_complete_request(Msg) ->
-    {Ref, Val} = case Msg of
-                     {get_result, Value, RefOrig} ->
-                         {RefOrig, {get_result, Value}};
-                     {set_result, Value, RefOrig} ->
-                         {RefOrig, {set_result, Value}};
-                     {error, Reason, RefOrig} ->
-                         {RefOrig, {error, Reason}};
-                     {timeout, RefOrig} ->
-                         {RefOrig, {error, timeout}};
-                     _ ->
-                         hordad_log:warning(
-                           ?MODULE,
-                           "Unable to complete request ~9999p:"
-                           "invalid request", [Msg]),
-
-                         {invalid, undefined}
-                 end,
-
+do_complete_request(Ref, Val, State) ->
     %% Locate stored request
-    case hordad_dht_meta:lookup(Ref) of
-        {CB, Watcher} ->
+    case dict:find(Ref, State) of
+        {ok, Client} ->
             hordad_log:info(?MODULE,
                              "~p: completing request: ~9999p", [Ref, Val]),
 
-            Watcher ! completed,
-            run_callback(CB, Val),
+            gen_server:reply(Client, Val),
 
-            hordad_dht_meta:delete(Ref);
-        undefined ->
+            dict:erase(Ref, State);
+        error ->
             hordad_log:warning(?MODULE,
                                "Unable to complete request - "
-                               "not in queue: ~9999p.", [Msg])
-    end,
-
-    ok.
-
-%% @doc Request watcher
-request_watcher(Ref) ->
-    Timeout = hordad_lcf:get_var({hordad_dht, net_timeout}),
-
-    % Ensure request has completed
-    receive
-        completed ->
-            ok
-    after
-        Timeout ->
-            complete_request({timeout, Ref})
+                               "not in queue: ~9999p.", [Ref]),
+            State
     end.
-
-%% @doc Run callback depending on its type.
--spec(run_callback(callback(), any()) -> ok).
-
-run_callback(CB, Value) when is_pid(CB) ->
-    CB ! Value,
-    ok;
-run_callback(CB, Value) when is_function(CB) ->
-    CB(Value),
-    ok;
-run_callback({Module, Fun, Args}, Value) ->
-    Module:Fun([Value | Args]),
-    ok.
 
 %% @doc Check if node id is already set and if not, set it
 -spec(set_node_id() -> ok).
@@ -380,17 +283,10 @@ run_callback({Module, Fun, Args}, Value) ->
 set_node_id() ->
     NodeId = case hordad_lcf:get_var({hordad_dht, node_id}, undefined) of
                  undefined ->
-                     case hordad_dht_meta:lookup(node_id) of
-                         [Id] ->
-                             Id;
-                         undefined ->
-                             % No ID yet, generate new one
-                             Id = hordad_dht_lib:gen_id(
-                                    hordad_lcf:get_var({hordad_dht, node_ip})),
-                             hordad_dht_meta:insert(node_id, Id),
-
-                             Id
-                     end;
+                     % No ID yet, generate new one
+                     Id = hordad_dht_lib:gen_id(
+                            hordad_lcf:get_var({hordad_dht, node_ip})),
+                     Id;
                  Id ->
                      Id
              end,
@@ -411,3 +307,21 @@ send_engine(Msg, IP) ->
     {ok, ok} = hordad_lib_net:gen_session(?MODULE, IP, ?SERVICE_TAG, Msg,
                                           Timeout),
     ok.
+
+%% @doc General function for calling DHT API
+call(Msg) ->
+    Timeout = hordad_lcf:get_var({hordad_dht, net_timeout}),
+    Ref = make_ref(),
+
+    try
+       gen_server:call(?SERVER, {Msg, Ref}, Timeout)
+    catch
+        {exit, {timeout, _}} ->
+            gen_server:call(?SERVER, {cancel, Ref}),
+
+            {error, timeout};
+        _:E ->
+            gen_server:call(?SERVER, {cancel, Ref}),
+
+            {error, E}
+    end.
