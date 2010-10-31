@@ -28,8 +28,19 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-export([get_ldb_tables/0]).
+
+-define(TABLE, dht_meta).
 -define(SERVICE_TAG, "dht").
 -define(SERVER, ?MODULE).
+
+-record(dht_meta, {key, value}).
+
+%% @doc hordad_ldb table info callback.
+-spec(get_ldb_tables() -> {Name :: atom(), Attrs :: [{atom(), any()}]}).
+
+get_ldb_tables() ->
+    {?TABLE, [{attributes, record_info(fields, dht_meta)}]}.
 
 %%====================================================================
 %% API
@@ -69,7 +80,12 @@ complete_request(Ref, Val) ->
 -spec(service_handler(any(), port()) -> ok).
 
 service_handler({route, Msg, Key, Ref, IP}, _Socket) ->
-    route(Msg, Key, Ref, IP);
+    case notify(Msg, Key, Ref, IP) of
+        continue ->
+            route(Msg, Key, Ref, IP);
+        stop ->
+            ok
+    end;
 service_handler({get_result, Val, Ref}, _Socket) ->
     complete_request(Ref, Val);
 service_handler({set_result, Val, Ref}, _Socket) ->
@@ -115,12 +131,19 @@ init([]) ->
 
 handle_call({{get, Key}, Ref}, From, State) ->
     {noreply, do_init_request(get, Key, Ref, From, State)};
+
 handle_call({{set, Key, Value}, Ref}, From, State) ->
     {noreply, do_init_request({set, Value}, Key, Ref, From, State)};
+
+handle_call({{join, Key}, Ref}, From, State) ->
+    {noreply, do_init_request(join, Key, Ref, From, State)};
+
 handle_call({deliver, Msg, Key, Ref, IP}, _From, State) ->
     {reply, do_deliver(Msg, Key, Ref, IP), State};
+
 handle_call({cancel, Ref}, _From, State) ->
     {reply, dict:erase(Ref, State)};
+
 handle_call({complete_request, Ref, Val}, _From, State) ->
     NewState= do_complete_request(Ref, Val, State),
 
@@ -231,6 +254,7 @@ route(Msg, Key, Ref, IP) ->
 -spec(join_dht(IP :: tuple()) -> ok).
 
 join_dht(EntryPoint) ->
+    Node = hordad_lcf:get_var({hordad_dht, node}),
     ok.
 
 %% @doc Forward message to another node
@@ -281,16 +305,17 @@ do_complete_request(Ref, Val, State) ->
 -spec(set_node_id() -> ok).
 
 set_node_id() ->
-    NodeId = case hordad_lcf:get_var({hordad_dht, node_id}, undefined) of
-                 undefined ->
+    NodeId = case hordad_ldb:read(?TABLE, node_id, undefined) of
+                 {ok, undefined} ->
                      % No ID yet, generate new one
                      Id = hordad_dht_lib:gen_id(
                             hordad_lcf:get_var({hordad_dht, node_ip})),
                      Id;
-                 Id ->
+                 {ok, [#dht_meta{value=Id}]} ->
                      Id
              end,
 
+    hordad_ldb:write(#dht_meta{key=node_id, value=NodeId}),
     hordad_lcf:set_var({hordad_dht, node_id}, NodeId),
     hordad_lcf:set_var({hordad_dht, node},
                        #dht_node{
@@ -325,3 +350,8 @@ call(Msg) ->
 
             {error, E}
     end.
+
+notify(join, Kef, Ref, IP) ->
+    continue;
+notify(Msg, Kef, Ref, IP) ->
+    continue.
