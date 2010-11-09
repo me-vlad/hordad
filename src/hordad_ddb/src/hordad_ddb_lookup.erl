@@ -13,7 +13,10 @@
 %% API
 -export([start_link/0,
          set_successor/1,
-         get_successor/1
+         get_self/0,
+         get_successor/0,
+         get_predecessor/0,
+         find_successor/1
         ]).
 
 %% gen_server callbacks
@@ -28,7 +31,7 @@
 -define(SERVICE_TAG, "ddb_lookup").
 
 -record(state, {
-          node,
+          self,
           successor,
           predecessor,
           finger_table,
@@ -52,15 +55,38 @@ start_link() ->
 set_successor(Node) when is_record(Node, node) ->
     gen_server:call(?SERVER, {set_successor, Node}).
 
-%% @doc Find successor for provided Id
--spec(get_successor(integer()) -> {ok, #node{}} | {next, #node{}}).
+%% @doc Get current node
+-spec(get_self() -> #node{}).
 
-get_successor(Id) ->
-    gen_server:call(?SERVER, {get_successor, Id}).
+get_self() ->
+    gen_server:call(?SERVER, get_self).
+
+%% @doc Get current node's successor
+-spec(get_successor() -> #node{} | undefined).
+
+get_successor() ->
+    gen_server:call(?SERVER, get_successor).
+
+%% @doc Get current node's predecessor
+-spec(get_predecessor() -> #node{} | undefined).
+
+get_predecessor() ->
+    gen_server:call(?SERVER, get_predecessor).
+
+%% @doc Find successor for provided Id
+-spec(find_successor(integer()) -> {ok, #node{}} | {next, #node{}}).
+
+find_successor(Id) ->
+    gen_server:call(?SERVER, {find_successor, Id}).
 
 %% @doc Service handler callback
 service_handler({"find_successor", Id}, _Socket) ->
-    get_successor(Id).
+    {ok, find_successor(Id)};
+service_handler("get_predecessor", _Socket) ->
+    {ok, get_predecessor()};
+service_handler({"pred_change", Node}, _Socket) ->
+    gen_server:call(?SERVER, {pred_change, Node}),
+    {ok, ok}.
 
 %%====================================================================
 %% gen_server callbacks
@@ -78,7 +104,7 @@ init([]) ->
                               {hordad_service, generic_service_handler,
                                [?MODULE, service_handler, []]}),
 
-    Node = hordad_ddb_lib:make_node(hordad_lcf:get_var({hordad_ddb, node_ip})),
+    Self = hordad_ddb_lib:make_node(hordad_lcf:get_var({hordad_ddb, node_ip})),
 
     case hordad_lcf:get_var({hordad_ddb, entry_point}, undefined) of
         undefined ->
@@ -87,11 +113,11 @@ init([]) ->
                             []),
             ok;
         Entry ->
-            spawn(fun() -> join(Entry, Node) end)
+            spawn(fun() -> join(Entry, Self) end)
     end,
 
     {ok, #state{
-       node = Node,
+       self = Self,
        successor = undefined,
        predecessor = undefined,
        successor_list = [],
@@ -111,8 +137,16 @@ init([]) ->
 %%--------------------------------------------------------------------
 handle_call({set_successor, Node}, _From, State) ->
     {reply, ok, State#state{successor=Node}};
-handle_call({get_successor, Id}, _From, State) ->
-    {reply, do_get_successor(Id, State), State}.
+handle_call(get_self, _From, #state{self=Self}=State) ->
+    {reply, Self, State};
+handle_call(get_successor, _From, #state{successor=Succ}=State) ->
+    {reply, Succ, State};
+handle_call(get_predecessor, _From, #state{predecessor=Pred}=State) ->
+    {reply, Pred, State};
+handle_call({pred_change, Node}, _From, State) ->
+    {reply, ok, do_pred_change(Node, State)};
+handle_call({find_successor, Id}, _From, State) ->
+    {reply, do_find_successor(Id, State), State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -163,14 +197,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @doc Join network
 join(Entry, Node) ->
-    Timeout = hordad_lcf:get_var({hordad_ddb, net_timeout}),
-
     hordad_log:info(?MODULE, "Trying to join existing overlay network using ~p"
                     "as entry point", [Entry]),
 
-    case hordad_lib_net:gen_session(?MODULE, Entry, ?SERVICE_TAG,
-                                    {"find_successor", Node#node.id},
-                                    Timeout) of
+    case session(Entry, ?SERVICE_TAG, {"find_successor", Node#node.id}) of
         {error, E} ->
             hordad_log:error(?MODULE, "Unable to join overlay network: ~p",
                              [E]),
@@ -186,8 +216,8 @@ join(Entry, Node) ->
             set_successor(Succ)
     end.
 
-%% @doc Workhouse for get_successor/1
-do_get_successor(Id, #state{node=Self, successor=Succ}=State) ->
+%% @doc Workhouse for find_successor/1
+do_find_successor(Id, #state{self=Self, successor=Succ}=State) ->
     case hordad_ddb_lib:is_node_in_range(Self#node.id, Succ#node.id, Id) of
         % Found successor
         true ->
@@ -200,7 +230,7 @@ do_get_successor(Id, #state{node=Self, successor=Succ}=State) ->
 %% @doc Find the closest preceding node according to finger table info
 -spec(closest_preceding_node(integer(), #state{}) -> #node{}).
 
-closest_preceding_node(Id, #state{node=Self, finger_table=FT}) ->
+closest_preceding_node(Id, #state{self=Self, finger_table=FT}) ->
     find_preceding_node(Id, Self#node.id, FT, Self).
 
 find_preceding_node(_, _, [], Def) ->
@@ -218,5 +248,66 @@ init_stabilizer() ->
     erlang:spawn_monitor(fun stabilizer/0).
     
 %% @doc Stabilizer function
+%% Run periodically to check if new node appeared between current node and its
+%% successor.
+
 stabilizer() ->
+    Interval = hordad_lcf:get_var({hordad_ddb, stabilize_interval}),
+
+    timer:sleep(Interval),
+
+    Self = get_self(),
+
+    case get_successor() of
+        undefined ->
+            ok;
+        Succ ->
+            {ok, Pred} = session(Succ#node.ip, ?SERVICE_TAG,
+                                 "get_predecessor"),
+
+            case hordad_ddb_lib:is_node_in_range(Self#node.id, Succ#node.id, 
+                                                 Pred#node.id) of
+                true ->
+                    {ok, ok} = session(Pred#node.ip, ?SERVICE_TAG,
+                                       {"new_pred", Self}),
+
+                    hordad_log:info(?MODULE,
+                                    "Stabilizer found new successor: ~p",
+                                    [Pred]),
+
+                    set_successor(Pred);
+                false ->
+                    ok
+            end
+    end,
+
     stabilizer().
+
+%% @doc Simple session wrapper
+session(IP, Tag, Service) ->
+    Timeout = hordad_lcf:get_var({hordad_ddb, net_timeout}),
+
+    hordad_lib_net:gen_session(?MODULE, IP, Tag, Service, Timeout).
+
+%% @doc Check for possible predecessor change
+-spec(do_pred_change(#node{}, #state{}) -> #state{}).
+
+do_pred_change(Node, #state{predecessor=Pred, self=Self}=State) ->
+    if
+        Pred == undefined ->
+            State#state{predecessor=Node};
+        true ->
+            InRange = hordad_ddb_lib:is_node_in_range(
+                        Pred#node.id,
+                        Self#node.id,
+                        Node#node.id),
+
+            case InRange of
+                true ->
+                    State#state{predecessor=Node};
+                false ->
+                    State
+            end
+    end.
+    
+    

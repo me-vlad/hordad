@@ -29,7 +29,7 @@ gen_id(Data) ->
 -spec(id_str2num(string()) -> integer()).
 
 id_str2num(Id) when is_list(Id) ->
-    httpd_util:hexlist_to_integer(Id).
+    erlang:list_to_integer(Id, 16).
 
 %% @doc Generate node id
 -spec(make_node(tuple()) -> #node{}).
