@@ -180,6 +180,12 @@ handle_info({'DOWN', Ref, process, Pid, Info},
                        [Info]),
 
     {noreply, State#state{stabilizer=init_stabilizer()}};
+handle_info({'DOWN', Ref, process, Pid, Info},
+            #state{predecessor_checker={Pid, Ref}}=State) ->
+    hordad_log:warning(?MODULE, "Predecessor checker process died: ~p."
+                       "Restarting", [Info]),
+
+    {noreply, State#state{predecessor_checker=init_predecessor_checker()}};
 handle_info(Msg, State) ->
     hordad_log:warning(?MODULE, "Unknown message received: ~9999p", [Msg]),
 
