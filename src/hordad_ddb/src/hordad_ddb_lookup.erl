@@ -13,6 +13,7 @@
 %% API
 -export([start_link/0,
          set_successor/1,
+         set_predecessor/1,
          get_self/0,
          get_successor/0,
          get_predecessor/0,
@@ -36,7 +37,8 @@
           predecessor,
           finger_table,
           successor_list,
-          stabilizer
+          stabilizer,
+          predecessor_checker
          }).
 
 %%====================================================================
@@ -50,10 +52,16 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %% @doc Set current node's successor
--spec(set_successor(#node{}) -> ok).
+-spec(set_successor(#node{} | undefined) -> ok).
 
-set_successor(Node) when is_record(Node, node) ->
+set_successor(Node) when is_record(Node, node); Node == undefined ->
     gen_server:call(?SERVER, {set_successor, Node}).
+
+%% @doc Set current node's predecessor
+-spec(set_predecessor(#node{} | undefined) -> ok).
+
+set_predecessor(Node) when is_record(Node, node); Node == undefined ->
+    gen_server:call(?SERVER, {set_predecessor, Node}).
 
 %% @doc Get current node
 -spec(get_self() -> #node{}).
@@ -81,12 +89,12 @@ find_successor(Id) ->
 
 %% @doc Service handler callback
 service_handler({"find_successor", Id}, _Socket) ->
-    {ok, find_successor(Id)};
+    find_successor(Id);
 service_handler("get_predecessor", _Socket) ->
-    {ok, get_predecessor()};
+    get_predecessor();
 service_handler({"pred_change", Node}, _Socket) ->
     gen_server:call(?SERVER, {pred_change, Node}),
-    {ok, ok}.
+    ok.
 
 %%====================================================================
 %% gen_server callbacks
@@ -122,7 +130,8 @@ init([]) ->
        predecessor = undefined,
        successor_list = [],
        finger_table = [],
-       stabilizer = init_stabilizer()
+       stabilizer = init_stabilizer(),
+       predecessor_checker = init_predecessor_checker()
       }
     }.
 
@@ -137,6 +146,8 @@ init([]) ->
 %%--------------------------------------------------------------------
 handle_call({set_successor, Node}, _From, State) ->
     {reply, ok, State#state{successor=Node}};
+handle_call({set_predecessor, Node}, _From, State) ->
+    {reply, ok, State#state{predecessor=Node}};
 handle_call(get_self, _From, #state{self=Self}=State) ->
     {reply, Self, State};
 handle_call(get_successor, _From, #state{successor=Succ}=State) ->
@@ -210,7 +221,7 @@ join(Entry, Node) ->
             join(Entry, Node);
         {ok, {next, Next}} ->
             join(Next#node.ip, Node);
-        {ok, {ok, Succ}} ->
+        {ok, {successor, Succ}} ->
             hordad_log:info(?MODULE, "Found successor: ~p", [Succ]),
 
             set_successor(Succ)
@@ -221,7 +232,7 @@ do_find_successor(Id, #state{self=Self, successor=Succ}=State) ->
     case hordad_ddb_lib:is_node_in_range(Self#node.id, Succ#node.id, Id) of
         % Found successor
         true ->
-            {ok, Succ};
+            {successor, Succ};
         % Search in finger table
         false ->
             {next, closest_preceding_node(Id, State)}
@@ -242,6 +253,10 @@ find_preceding_node(Id, SelfId, [Node | T], Def) ->
         _ ->
             find_preceding_node(Id, SelfId, T, Def)
     end.
+
+%% @doc Init pred checker process
+init_predecessor_checker() ->
+    erlang:spawn_monitor(fun predecessor_checker/0).
 
 %% @doc Init stabilizer process
 init_stabilizer() ->
@@ -269,7 +284,7 @@ stabilizer() ->
                                                  Pred#node.id) of
                 true ->
                     {ok, ok} = session(Pred#node.ip, ?SERVICE_TAG,
-                                       {"new_pred", Self}),
+                                       {"pred_change", Self}),
 
                     hordad_log:info(?MODULE,
                                     "Stabilizer found new successor: ~p",
@@ -282,6 +297,31 @@ stabilizer() ->
     end,
 
     stabilizer().
+
+%% @doc Predecessor checker function
+%% Run periodically to check if our predecessor has failed.
+
+predecessor_checker() ->
+    Interval = hordad_lcf:get_var({hordad_ddb, pred_checker_interval}),
+
+    timer:sleep(Interval),
+
+    case get_predecessor() of
+        undefined ->
+            ok;
+        Pred ->
+            case session(Pred#node.ip, "aes_agent", "status") of
+                {ok, available} ->
+                    ok;
+                %% Assume failed
+                _ ->
+                    hordad_log:info(?MODULE, "Predecessor is down", []),
+
+                    set_predecessor(undefined)
+            end
+    end,
+
+    predecessor_checker().
 
 %% @doc Simple session wrapper
 session(IP, Tag, Service) ->
@@ -309,5 +349,4 @@ do_pred_change(Node, #state{predecessor=Pred, self=Self}=State) ->
                     State
             end
     end.
-    
     
