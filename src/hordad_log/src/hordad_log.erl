@@ -4,7 +4,6 @@
 %%% Description: Logger manager
 %%%
 %%% Created : 2010-01-09 by Max E. Kuznecov <mek@mek.uz.ua>
-%%% @copyright 2009-2010 Server Labs
 %%% -------------------------------------------------------------------
 
 -module(hordad_log).
@@ -58,9 +57,9 @@ info(From, Format, Data) ->
 
 %% @doc Log debug message. Shorthand for log(From, debug, Format, Data).
 debug(From, Format, Data) ->
-    log(From, info, Format, Data).
+    log(From, debug, Format, Data).
 
-%% @doc Command all hanlders to re-open logs
+%% @doc Command all handlers to re-open logs
 logrotate() ->
     gen_event:notify(?SERVER, logrotate).
 
@@ -87,7 +86,7 @@ start_link() ->
 
 %% @doc Check if required logging level is allowed in conf
 -spec(level_allowed(log_level()) -> boolean()).
-             
+
 level_allowed(Level) ->
     case hordad_lcf:get_var({hordad_log, levels}, all) of
         all ->

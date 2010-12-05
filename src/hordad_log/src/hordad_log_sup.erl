@@ -45,7 +45,11 @@ init([]) ->
     Logger = {hordad_log, {hordad_log, start_link,[]},
               permanent, 2000, worker, [hordad_log]},
 
-    {ok,{{one_for_one, 5, 1}, [Logger]}}.
+    SASLAdapter = {hordad_log_sasl_adapter,
+                   {hordad_log_sasl_adapter, start_link,[]},
+                   permanent, 2000, worker, [hordad_log_sasl_adapter]},
+
+    {ok,{{one_for_one, 5, 1}, [Logger, SASLAdapter]}}.
 
 %%====================================================================
 %% Internal functions
