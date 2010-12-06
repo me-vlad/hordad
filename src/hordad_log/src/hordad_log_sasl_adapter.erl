@@ -3,7 +3,7 @@
 %%% Author  : Max E. Kuznecov <mek@mek.uz.ua>
 %%% Description: SASL integration into hordad_log facility
 %%%
-%%% Created : 2010-01-10 by Max E. Kuznecov <mek@mek.uz.ua>
+%%% Created : 2010-12-05 by Max E. Kuznecov <mek@mek.uz.ua>
 %%% -------------------------------------------------------------------
 
 -module(hordad_log_sasl_adapter).
@@ -48,11 +48,20 @@ init([]) ->
 handle_event({error, _, {_Pid, Format, Data}}, State) ->
     hordad_log:error(sasl, Format, Data),
     {ok, State};
+handle_event({error_report, _, {_, _, Report}}, State) ->
+    hordad_log:error(sasl, "~p", [Report]),
+    {ok, State};
 handle_event({warning_msg, _, {_Pid, Format, Data}}, State) ->
     hordad_log:warning(sasl, Format, Data),
     {ok, State};
+handle_event({warning_report, _, {_, _, Report}}, State) ->
+    hordad_log:error(sasl, "~p", [Report]),
+    {ok, State};
 handle_event({info_msg, _, {_Pid, Format, Data}}, State) ->
-    hordad_log:info(sasl, Format, Data),
+    hordad_log:warning(sasl, Format, Data),
+    {ok, State};
+handle_event({info_report, _, {_, _, Report}}, State) ->
+    hordad_log:info(sasl, "~p", [Report]),
     {ok, State};
 handle_event(Msg, State) ->
     hordad_log:info(?MODULE, "Unknown event received: ~p", [Msg]),
