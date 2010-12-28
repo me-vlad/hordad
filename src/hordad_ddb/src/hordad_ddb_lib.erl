@@ -43,6 +43,8 @@ make_node(IP) ->
           ip=IP}.
 
 %% @doc Check if provided node Id lies in range in circular id space
+-spec(is_node_in_range(integer(), integer(), integer) -> boolean()).
+
 is_node_in_range(From, To, Id) ->
     if
         Id > From andalso Id =< To ->

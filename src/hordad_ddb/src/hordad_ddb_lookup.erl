@@ -31,6 +31,8 @@
 -define(SERVER, ?MODULE).
 -define(SERVICE_TAG, "ddb_lookup").
 
+-type(finger_table() :: list()).
+
 -record(state, {
           self,
           successor,
@@ -38,7 +40,8 @@
           finger_table,
           successor_list,
           stabilizer,
-          predecessor_checker
+          predecessor_checker,
+          finger_checker
          }).
 
 %%====================================================================
@@ -129,9 +132,10 @@ init([]) ->
        successor = undefined,
        predecessor = undefined,
        successor_list = [],
-       finger_table = [],
+       finger_table = init_finger_table(),
        stabilizer = init_stabilizer(),
-       predecessor_checker = init_predecessor_checker()
+       predecessor_checker = init_predecessor_checker(),
+       finger_checker = init_finger_checker()
       }
     }.
 
@@ -186,6 +190,12 @@ handle_info({'DOWN', Ref, process, Pid, Info},
                        "Restarting", [Info]),
 
     {noreply, State#state{predecessor_checker=init_predecessor_checker()}};
+handle_info({'DOWN', Ref, process, Pid, Info},
+            #state{finger_checker={Pid, Ref}}=State) ->
+    hordad_log:warning(?MODULE, "Finger checker process died: ~p."
+                       "Restarting", [Info]),
+
+    {noreply, State#state{finger_checker=init_finger_checker()}};
 handle_info(Msg, State) ->
     hordad_log:warning(?MODULE, "Unknown message received: ~9999p", [Msg]),
 
@@ -215,7 +225,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Join network
 join(Entry, Node) ->
     hordad_log:info(?MODULE, "Trying to join existing overlay network using ~p"
-                    "as entry point", [Entry]),
+                    " as entry point", [Entry]),
 
     case session(Entry, ?SERVICE_TAG, {"find_successor", Node#node.id}) of
         {error, E} ->
@@ -248,17 +258,19 @@ do_find_successor(Id, #state{self=Self, successor=Succ}=State) ->
 -spec(closest_preceding_node(integer(), #state{}) -> #node{}).
 
 closest_preceding_node(Id, #state{self=Self, finger_table=FT}) ->
-    find_preceding_node(Id, Self#node.id, FT, Self).
+    find_preceding_node(Id, Self#node.id, lists:reverse(FT), Self).
 
 find_preceding_node(_, _, [], Def) ->
     Def;
-find_preceding_node(Id, SelfId, [Node | T], Def) ->
+find_preceding_node(Id, SelfId, [Node | T], Def) when is_record(Node, node) ->
     case hordad_ddb_lib:is_node_in_range(SelfId, Id, Node#node.id) of
         true ->
             Node;
         _ ->
             find_preceding_node(Id, SelfId, T, Def)
-    end.
+    end;
+find_preceding_node(Id, SelfId, [_ | T], Def) ->
+    find_preceding_node(Id, SelfId, T, Def).
 
 %% @doc Init pred checker process
 init_predecessor_checker() ->
@@ -268,6 +280,16 @@ init_predecessor_checker() ->
 init_stabilizer() ->
     erlang:spawn_monitor(fun stabilizer/0).
     
+%% @doc Init finger checker process
+init_finger_checker() ->
+    erlang:spawn_monitor(fun finger_checker/0).
+
+%% @doc Init finger table
+-spec(init_finger_table() -> finger_table()).
+
+init_finger_table() ->
+    lists:duplicate(?M, undefined).
+
 %% @doc Stabilizer function
 %% Run periodically to check if new node appeared between current node and its
 %% successor.
@@ -329,6 +351,16 @@ predecessor_checker() ->
 
     predecessor_checker().
 
+%% @doc Finger checker function
+%% Run periodically to repair finger table
+
+finger_checker() ->
+    Interval = hordad_lcf:get_var({hordad_ddb, finger_checker_interval}),
+
+    timer:sleep(Interval),
+
+    finger_checker().
+
 %% @doc Simple session wrapper
 session(IP, Tag, Service) ->
     Timeout = hordad_lcf:get_var({hordad_ddb, net_timeout}),
@@ -355,4 +387,3 @@ do_pred_change(Node, #state{predecessor=Pred, self=Self}=State) ->
                     State
             end
     end.
-    

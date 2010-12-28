@@ -23,7 +23,6 @@ APP_CB_T = """\
 %%%%%% Description: Application callback
 %%%%%%
 %%%%%% Created : %(date)s by Max E. Kuznecov <mek@mek.uz.ua>
-%%%%%% @copyright 2009-%(year)s Server Labs
 %%%%%% -------------------------------------------------------------------
 
 -module(%(app)s_app).
@@ -66,7 +65,6 @@ APP_SUP_T = """\
 %%%%%% Description: Application supervisor
 %%%%%%
 %%%%%% Created : %(date)s by Max E. Kuznecov <mek@mek.uz.ua>
-%%%%%% @copyright 2009-%(year)s Server Labs
 %%%%%% -------------------------------------------------------------------
 
 -module(%(app)s_sup).
