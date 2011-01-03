@@ -4,7 +4,6 @@
 %%% Description: Application supervisor
 %%%
 %%% Created : 2010-11-01 by Max E. Kuznecov <mek@mek.uz.ua>
-%%% @copyright 2009-2010 Server Labs
 %%% -------------------------------------------------------------------
 
 -module(hordad_ddb_sup).

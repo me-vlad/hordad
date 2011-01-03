@@ -4,7 +4,6 @@
 %%% Description: Hordad AES agent
 %%%
 %%% Created : 2010-02-11 by Max E. Kuznecov <mek@mek.uz.ua>
-%%% @copyright 2009-2010 Server Labs
 %%% -------------------------------------------------------------------
 
 -module(hordad_aes_agent).

@@ -9,6 +9,9 @@
 -ifndef(HORDAD_DDB_LOOKUP_HRL).
 -define(HORDAD_DDB_LOOKUP_HRL, true).
 
+-type(finger_table() :: list()).
+-type(node_id() :: integer()).
+
 %% Keyspace length
 -define(M, 160).
 
@@ -16,8 +19,8 @@
 -define(MODULO, 1461501637330902918203684832716283019655932542976).
 
 -record(node, {
-          id,     % Node ID (integer)
-          id_str, % Node ID (string)
+          id,     % Node ID (node_id())
+          id_str, % Node ID (string())
           ip      % Node IP
          }).
 
