@@ -41,10 +41,10 @@ start_link() ->
 %% specifications.
 %%--------------------------------------------------------------------
 init([]) ->
-    Child = {hordad_ddb, {hordad_ddb, start_link,[]},
-          permanent, 2000, worker, [hordad_ddb]},
+    Lookup = {hordad_ddb_lookup, {hordad_ddb_lookup, start_link,[]},
+              permanent, 2000, worker, [hordad_ddb_lookup]},
 
-    {ok, {{one_for_one, 5, 1}, [Child]}}.
+    {ok, {{one_for_one, 5, 1}, [Lookup]}}.
 
 %%====================================================================
 %% Internal functions

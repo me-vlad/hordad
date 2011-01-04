@@ -31,8 +31,8 @@
 -spec(init_db() -> ok | {error, any()}).
 
 init_db() ->
-    application:set_env(mnesia, dir,
-                        hordad_lcf:get_var({hordad_ldb, db_dir})),
+    DbDir = get_db_dir(),
+    application:set_env(mnesia, dir, DbDir),
 
     case hordad_lcf:get_var({hordad_ldb, override_existing},
                             ?DEFAULT_OVERRIDE) of
@@ -185,3 +185,13 @@ run_transaction(Fun) ->
         {aborted, Reason} ->
             {error, Reason}
     end.
+
+get_db_dir() ->
+    case hordad_lcf:get_var({hordad_ldb, db_dir}) of
+        [$/ | _]=Absolute ->
+            Absolute;
+        Relative ->
+            filename:join([hordad_lib:get_system_base(),
+                           Relative])
+    end.
+    

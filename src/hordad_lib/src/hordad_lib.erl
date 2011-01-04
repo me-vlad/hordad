@@ -28,13 +28,13 @@
 
 %% @doc Get system base dir
 get_system_base() ->
-    {ok, [SystemBase]} = init:get_argument(hordad_system_base),
+    {ok, [[SystemBase]]} = init:get_argument(hordad_system_base),
 
     SystemBase.
 
 %% @doc Get log base dir
 get_log_base() ->
-    {ok, [LogBase]} = init:get_argument(hordad_log_base),
+    {ok, [[LogBase]]} = init:get_argument(hordad_log_base),
 
     LogBase.
 

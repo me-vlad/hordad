@@ -15,9 +15,9 @@ export ERL_LIBS=../../src:../../lib
 
 erl +K true -smp auto -sname hordad_sys_%(name)s -boot hordad \\
     -ssl protocol_version '[sslv3]' \\
-    -hordad_system_base . \\
-    -hordad_log_base ./log \\
-    -hordad_lcf conf ./etc/lcf.conf \\
+    -hordad_system_base '.' \\
+    -hordad_log_base 'log' \\
+    -hordad_lcf conf '"etc/lcf.conf"' \\
     $@
 """
 
@@ -59,3 +59,4 @@ os.makedirs(join(full_path, "log"))
 
 write_lcf_conf(full_path, ip, port)
 write_start_sh(join(full_path, "start.sh"), START_SH_TPL % locals())
+os.symlink("../../src/hordad.boot", join(full_path, "hordad.boot"))
