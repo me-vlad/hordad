@@ -11,7 +11,7 @@ START_SH_TPL = """\
 # Hordad starter
 #
 
-export ERL_LIBS=../../src
+export ERL_LIBS=../../src:../../lib
 
 erl +K true -smp auto -sname hordad_sys_%(name)s -boot hordad \\
     -ssl protocol_version '[sslv3]' \\

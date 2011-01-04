@@ -25,4 +25,4 @@ clean:
 	@rm -f $(EMAKEFILE)
 
 ebin/%.beam: src/%.erl
-	$(ERLC) $(ERLC_FLAGS) $(INCLUDE) -o ./ebin/ $<
+	env ERL_LIBS=$(ERL_LIBS) $(ERLC) $(ERLC_FLAGS) $(INCLUDE) -o ./ebin/ $<

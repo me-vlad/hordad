@@ -8,7 +8,7 @@
 # typecheck: Run dialyzer static type analysis checks
 # tests: Run application tests 
 
-export ERL_LIBS=$(shell pwd):/usr/lib
+export ERL_LIBS=$(shell pwd):$(shell pwd)/../lib
 
 START_TESTS = ./start-tests.sh
 APPS := $(wildcard hordad_*) contrib

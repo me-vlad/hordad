@@ -3,7 +3,7 @@
 # Hordad starter
 #
 
-export ERL_LIBS=.:/usr/lib
+export ERL_LIBS=.:../lib
 
 erl +K true -smp auto -sname hordad_sys -boot hordad -pz */ebin \
     -ssl protocol_version '[sslv3]' \
