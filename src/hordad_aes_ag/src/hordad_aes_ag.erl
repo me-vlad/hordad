@@ -157,31 +157,28 @@ worker(Table) ->
     Period = hordad_lcf:get_var({?MODULE, cycle_period},
                                 ?DEFAULT_CYCLE_PERIOD),
 
-    receive
-    after
-        Period ->
-            aggregate(hordad_lcf:get_var({?MODULE, pollers}, []), Table),
-            worker(Table)
-    end.
+    timer:sleep(Period),
+
+    aggregate(hordad_lcf:get_var({?MODULE, pollers}, []), Table),
+    worker(Table).
 
 %% @doc Poll every poller node provided and make a decision about
 %%      node status
 %% @end
 -type(ip() :: {integer(), integer(), integer(), integer()}).
--spec(aggregate([ip()], atom()) -> ok).
+-spec(aggregate([{ip(), integer()}], atom()) -> ok).
 
 aggregate(Pollers, Table) ->
-    Dict = lists:foldl(fun(Node, Acc) ->
-                               Ref = make_ref(),
-                               Parent = self(),
+    Dict = lists:foldl(
+             fun(Node, Acc) ->
+                     Ref = make_ref(),
+                     Parent = self(),
 
-                               dict:store(
-                                 Node,
-                                 {Ref,
-                                  spawn(fun() ->
-                                                poll(Node, Ref, Parent)
-                                        end)}, Acc)
-                       end, dict:new(), Pollers),
+                     dict:store(Node,
+                       {Ref, spawn(fun() ->
+                                           poll(Node, Ref, Parent)
+                                   end)}, Acc)
+             end, dict:new(), Pollers),
 
     case wait_for_reports(Pollers, Dict) of
         timeout ->
@@ -195,14 +192,14 @@ aggregate(Pollers, Table) ->
 
 %% @doc Request poller to init polling procedure and send parent the result
 %%      Parent receives message: {reference(), ip(), pid(), error | any()}
--spec(poll(ip(), reference(), pid()) -> ok).
+-spec(poll({ip(), integer()}, reference(), pid()) -> ok).
 
-poll(Poller, Ref, Parent) ->
+poll({IP, Port}=Poller, Ref, Parent) ->
     hordad_log:info(?MODULE, "Initiating polling session with ~p", [Poller]),
 
     try
         {ok, {ok, Ref, Report}} =
-          hordad_lib_net:gen_session(Poller, "aes_poller", {"poll", Ref}),
+          hordad_lib_net:gen_session(IP, Port, "aes_poller", {"poll", Ref}),
 
         Parent ! {Ref, Poller, self(), Report}
     catch
@@ -216,7 +213,7 @@ poll(Poller, Ref, Parent) ->
     ok.
 
 %% @doc Wait for every poller session completes
--spec(wait_for_reports([ip()], dict()) -> dict() | timeout).
+-spec(wait_for_reports([{ip(), integer()}], dict()) -> dict() | timeout).
 
 wait_for_reports([], Dict) ->
     Dict;

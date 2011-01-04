@@ -85,14 +85,14 @@ poller_loop(Ref, Data, Spawned) ->
     end.
    
 %% @doc Poll node and send result to a parent
-poll_node(Parent, Ref, Node) ->
+poll_node(Parent, Ref, {Node, Port}) ->
     Timeout = hordad_lcf:get_var({?MODULE, poll_timeout}),
-    hordad_log:info(?MODULE, "Polling node: ~p", [Node]),
+    hordad_log:info(?MODULE, "Polling node: ~p:~p", [Node, Port]),
 
     try
-        {ok, Report} = hordad_lib_net:gen_session(
-                         ?MODULE, Node,
-                         "aes_agent", "report", Timeout),
+        {ok, Report} = hordad_lib_net:gen_session(?MODULE, Node, Port,
+                                                  "aes_agent", "report",
+                                                  Timeout),
 
         hordad_log:info(?MODULE, "Node ~p status=~p, lar=~p",
                         [Node, Report#agent_report.status,
