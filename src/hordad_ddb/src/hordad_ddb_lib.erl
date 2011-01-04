@@ -11,7 +11,7 @@
 -export([
          gen_id/1,
          id_str2num/1,
-         make_node/1,
+         make_node/2,
          is_node_in_range/3
         ]).
 
@@ -32,14 +32,15 @@ id_str2num(Id) when is_list(Id) ->
     erlang:list_to_integer(Id, 16).
 
 %% @doc Generate node id
--spec(make_node(tuple()) -> #node{}).
+-spec(make_node(tuple(), integer()) -> #node{}).
              
-make_node(IP) ->
+make_node(IP, Port) ->
     StrID = gen_id(IP),
     NumID = id_str2num(StrID),
 
     #node{id=NumID,
           id_str=StrID,
+          port=Port,
           ip=IP}.
 
 %% @doc Check if provided node Id lies in range in circular id space

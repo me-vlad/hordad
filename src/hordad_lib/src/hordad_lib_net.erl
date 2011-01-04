@@ -22,11 +22,11 @@
          read_extract_socket/4,
          write_socket/3,
          rw_loop/3,
-         connect/1,
          connect/2,
-         gen_session/3,
+         connect/3,
          gen_session/4,
          gen_session/5,
+         gen_session/6,
          ip2str/1,
          str2ip/1,
          is_ssl_mode/0,
@@ -186,18 +186,16 @@ rw_loop(Module, Socket, Cb) ->
     end.
 
 %% @doc Connect to another node
--spec(connect(address()) -> {ok, port()} | {error, term()}).
+-spec(connect(address(), integer()) -> {ok, port()} | {error, term()}).
 
-connect(Node) ->
-    connect(Node, infinity).
+connect(Node, Port) ->
+    connect(Node, Port, infinity).
 
 %% @doc Connect to another node
--spec(connect(address(), integer() | infinity) ->
+-spec(connect(address(), integer(), integer() | infinity) ->
              {ok, port()} | {error, term()}).
 
-connect(Node, Timeout) ->
-    Port = hordad_lcf:get_var({hordad_gk, bind_port}),
-
+connect(Node, Port, Timeout) ->
     Opts = [binary, {packet, raw}, {active, false}],
 
     case hordad_lcf:get_var({hordad, ssl}) of
@@ -209,23 +207,24 @@ connect(Node, Timeout) ->
 
 %% @doc Generic functions which provide quick way of sending single message
 %%      to another hordad node and receiving response.
--spec(gen_session(address(), string(), any()) -> {ok, any()} | {error, any()}).
-
-gen_session(Node, Header, Message) ->
-    gen_session(?MODULE, Node, Header, Message, infinity).
-
--spec(gen_session(address(), string(), any(), timeout()) ->
+-spec(gen_session(address(), integer(), string(), any()) ->
              {ok, any()} | {error, any()}).
 
-gen_session(Node, Header, Message, Timeout) ->
-    gen_session(?MODULE, Node, Header, Message, Timeout).
+gen_session(Node, Port, Header, Message) ->
+    gen_session(?MODULE, Node, Port, Header, Message, infinity).
 
--spec(gen_session(atom(), address(), string(), any(), timeout()) ->
+-spec(gen_session(address(), integer(), string(), any(), timeout()) ->
              {ok, any()} | {error, any()}).
 
-gen_session(Module, Node, Header, Message, Timeout) ->
+gen_session(Node, Port, Header, Message, Timeout) ->
+    gen_session(?MODULE, Node, Port, Header, Message, Timeout).
+
+-spec(gen_session(atom(), address(), integer(), string(), any(), timeout()) ->
+             {ok, any()} | {error, any()}).
+
+gen_session(Module, Node, Port, Header, Message, Timeout) ->
     try
-        {ok, S} = connect(Node, Timeout),
+        {ok, S} = connect(Node, Port, Timeout),
         ok = write_socket(Module, S, make_header(Header)),
         ok = write_socket(Module, S, make_message(Message)),
         {ok, R} = read_extract_socket(Module, S, 0, Timeout),
@@ -258,15 +257,15 @@ is_ssl_mode() ->
 get_ssl_opts() ->
     NodeCert =
         hordad_lib:get_file(
-          ssl, hordad_lcf:get_var({hordad_ssl, node_certificate})),
+          ssl, hordad_lcf:get_var({hordad, ssl_node_certificate})),
 
     NodeKey =
         hordad_lib:get_file(
-          ssl, hordad_lcf:get_var({hordad_ssl, node_key})),
+          ssl, hordad_lcf:get_var({hordad, ssl_node_key})),
             
     CACert =
         hordad_lib:get_file(
-          ssl, hordad_lcf:get_var({hordad_ssl, ca_certificate})),
+          ssl, hordad_lcf:get_var({hordad, ssl_ca_certificate})),
 
     [{verify, 2},
      {depth, 1},

@@ -132,7 +132,8 @@ init([]) ->
                               {hordad_service, generic_service_handler,
                                [?MODULE, service_handler, []]}),
 
-    Self = hordad_ddb_lib:make_node(hordad_lcf:get_var({hordad_ddb, node_ip})),
+    [IP, Port] = hordad_lcf:get_vars([{hordad, bind_ip}, {hordad, bind_port}]),
+    Self = hordad_ddb_lib:make_node(IP, Port),
 
     {ok, #state{
        self = Self,
@@ -258,14 +259,17 @@ init_join(Self) ->
         undefined ->
             hordad_log:info(?MODULE, "Join: no entry point defined", []),
             undefined;
-        Entry ->
-            spawn_monitor(fun() -> join(Entry, Self) end)
+        {Ip, Port} ->
+            spawn_monitor(
+              fun() ->
+                      join(hordad_ddb_lib:make_node(Ip, Port), Self)
+              end)
     end.
 
 %% @doc Join network
-join(Entry, #node{id=Id}=Node) ->
-    hordad_log:info(?MODULE, "Trying to join existing overlay network using ~p"
-                    " as entry point", [Entry]),
+join(#node{ip=Ip, port=Port}=Entry, #node{id=Id}=Node) ->
+    hordad_log:info(?MODULE, "Trying to join existing overlay network "
+                    "using ~p:~p as entry point", [Ip, Port]),
 
     case collect_successors(Entry, [Id]) of
         {error, Reason, _, _, _} ->
@@ -385,13 +389,12 @@ stabilizer() ->
         undefined ->
             ok;
         Succ ->
-            {ok, Pred} = session(Succ#node.ip, ?SERVICE_TAG,
-                                 "get_predecessor"),
+            {ok, Pred} = session(Succ, ?SERVICE_TAG, "get_predecessor"),
 
             case hordad_ddb_lib:is_node_in_range(Self#node.id, Succ#node.id,
                                                  Pred#node.id) of
                 true ->
-                    {ok, ok} = session(Pred#node.ip, ?SERVICE_TAG,
+                    {ok, ok} = session(Pred, ?SERVICE_TAG,
                                        {"pred_change", Self}),
 
                     hordad_log:info(?MODULE,
@@ -419,7 +422,7 @@ predecessor_checker() ->
             ok;
         Pred ->
             %% TODO: Replace ad-hoc monitoring
-            case session(Pred#node.ip, "aes_agent", "status") of
+            case session(Pred, "aes_agent", "status") of
                 {ok, available} ->
                     ok;
                 %% Assume failed
@@ -466,10 +469,10 @@ finger_checker(Node, Ids, Interval) ->
     end.
 
 %% @doc Simple session wrapper
-session(IP, Tag, Service) ->
+session(#node{ip=IP, port=Port}, Tag, Service) ->
     Timeout = hordad_lcf:get_var({hordad_ddb, net_timeout}),
 
-    hordad_lib_net:gen_session(?MODULE, IP, Tag, Service, Timeout).
+    hordad_lib_net:gen_session(?MODULE, IP, Port, Tag, Service, Timeout).
 
 %% @doc Check for possible predecessor change
 -spec(do_pred_change(#node{}, #state{}) -> #state{}).

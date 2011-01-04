@@ -10,11 +10,6 @@
 -ifndef(LIB_CONST_HRL).
 -define(LIB_CONST_HRL, true).
 
-% Base system directory
--define(CONST_SYSTEM_BASE, "/usr/hordad").
-% Logs dir
--define(CONST_LOG_BASE, "/var/log/hordad").
-
 % Configuration directory
 -define(CONST_CONF_SUBDIR, "etc").
 

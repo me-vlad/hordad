@@ -11,10 +11,11 @@
 
 -include("lib_const.hrl").
 
--export([get_conf_dir/0,
+-export([get_system_base/0,
+         get_log_base/0,
+         get_conf_dir/0,
          get_conf_file/1,
          get_db_dir/0,
-         get_log_dir/0,
          get_ssl_dir/0,
          get_file/2,
          datetime/1,
@@ -25,29 +26,35 @@
          ensure_started/1
         ]).
 
+%% @doc Get system base dir
+get_system_base() ->
+    {ok, [SystemBase]} = init:get_argument(hordad_system_base),
+
+    SystemBase.
+
+%% @doc Get log base dir
+get_log_base() ->
+    {ok, [LogBase]} = init:get_argument(hordad_log_base),
+
+    LogBase.
+
 %% @doc Get full path to configuration directory
 -spec(get_conf_dir() -> string()).
 
 get_conf_dir() ->
-    filename:join([?CONST_SYSTEM_BASE, ?CONST_CONF_SUBDIR]).
+    filename:join([get_system_base(), ?CONST_CONF_SUBDIR]).
 
 %% @doc Get full path to db directory
 -spec(get_db_dir() -> string()).
 
 get_db_dir() ->
-    filename:join([?CONST_SYSTEM_BASE, ?CONST_DB_SUBDIR]).
-
-%% @doc Get full path to log directory
--spec(get_log_dir() -> string()).
-
-get_log_dir() ->
-    ?CONST_LOG_BASE.
+    filename:join([get_system_base(), ?CONST_DB_SUBDIR]).
 
 %% @doc Get full path to ssl directory
 -spec(get_ssl_dir() -> string()).
 
 get_ssl_dir() ->
-    filename:join([?CONST_SYSTEM_BASE, ?CONST_SSL_SUBDIR]).
+    filename:join([get_system_base(), ?CONST_SSL_SUBDIR]).
 
 %% @doc Get full path to file
 -type(subdir() :: conf | db | log | ssl).
@@ -58,7 +65,7 @@ get_file(conf, File) ->
 get_file(db, File) ->
     filename:join([get_db_dir(), File]);
 get_file(log, File) ->
-    filename:join([get_log_dir(), File]);
+    filename:join([get_log_base(), File]);
 get_file(ssl, File) ->
     filename:join([get_ssl_dir(), File]).
 

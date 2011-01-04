@@ -50,18 +50,16 @@ start_link() ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    Port = hordad_lcf:get_var({?MODULE, bind_port}),
-    IP = hordad_lcf:get_var({?MODULE, bind_ip}, all),
+    Port = hordad_lcf:get_var({hordad, bind_port}),
+    IP = hordad_lcf:get_var({hordad, bind_ip}),
 
     RawOpts = [binary,
                {active, false},
                {reuseaddr, true},
                {keepalive, true},
-               {packet, raw}
-              ] ++ case IP of
-                       all -> [];
-                       _ -> [{ip, IP}]
-                   end,
+               {packet, raw},
+               {ip, IP}
+              ],
 
     {ListenF, Opts} = case hordad_lib_net:is_ssl_mode() of
                           true ->

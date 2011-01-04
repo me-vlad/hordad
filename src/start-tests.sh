@@ -18,4 +18,4 @@ for TEST in $(echo $1/ebin/*_tests.beam); do
     TESTS=${X%.beam}" "$TESTS
 done
 
-./start.sh -config test -hordad_lcf conf \"$CONF\" -tests $TESTS
+./start.sh -hordad_lcf conf \"$CONF\" -tests $TESTS
