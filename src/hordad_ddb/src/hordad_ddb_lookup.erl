@@ -137,7 +137,7 @@ init([]) ->
 
     {ok, #state{
        self = Self,
-       successor = Self,
+       successor = undefined,
        predecessor = undefined,
        successor_list = [],
        join = init_join(Self),
@@ -312,17 +312,25 @@ collect_successors(Node, Rest, FoundAcc) ->
     end.
 
 %% @doc Workhouse for find_successors/1
-do_find_successors(Ids, #state{self=Self, successor=Succ}=State) ->
+do_find_successors(Ids, #state{self=Self, successor=RawSucc}=State) ->
+    Succ = case RawSucc of
+               undefined ->
+                   Self;
+               _ ->
+                   RawSucc
+           end,
+
     {Found, RawNotFound} =
         lists:foldr(
           fun(Id, {Found, NotFound}) ->
-                  case hordad_ddb_lib:is_node_in_range(Self#node.id,
-                                                       Succ#node.id, Id) of
-                      %% Found successor
-                      true ->
+                  InRange = hordad_ddb_lib:is_node_in_range(Self#node.id,
+                                                            Succ#node.id, Id),
+                  if
+                      %% Found successor or we don't have successor ourselves
+                      Succ == Self orelse InRange == true ->
                           {[{Id, Succ} | Found], NotFound};
                       %% Search in finger table
-                      false ->
+                      true ->
                           Next = closest_preceding_node(Id, State),
                           Cur = hordad_lib:getv(Next, NotFound, []),
 
@@ -391,19 +399,24 @@ stabilizer() ->
         Succ ->
             {ok, Pred} = session(Succ, ?SERVICE_TAG, "get_predecessor"),
 
-            case hordad_ddb_lib:is_node_in_range(Self#node.id, Succ#node.id,
-                                                 Pred#node.id) of
+            if
+                Pred == undefined ->
+                    {ok, ok} = session(Succ, ?SERVICE_TAG,
+                                       {"pred_change", Self});
                 true ->
-                    {ok, ok} = session(Pred, ?SERVICE_TAG,
-                                       {"pred_change", Self}),
+                    case hordad_ddb_lib:is_node_in_range(Self#node.id,
+                                                         Succ#node.id,
+                                                         Pred#node.id) of
+                        true ->
+                            {ok, ok} = session(Pred, ?SERVICE_TAG,
+                                               {"pred_change", Self}),
 
-                    hordad_log:info(?MODULE,
-                                    "Stabilizer found new successor: ~p",
-                                    [Pred]),
+                            hordad_log:info(?MODULE,
+                                            "Stabilizer found new "
+                                            "successor: ~p", [Pred]),
 
-                    set_successor(Pred);
-                false ->
-                    ok
+                            set_successor(Pred)
+                    end
             end
     end,
 
@@ -439,12 +452,19 @@ predecessor_checker() ->
 %% Run periodically to repair finger table
 
 finger_checker() ->
-    FT = get_finger_table(),
-    Ids = [Id || {Id, _} <- FT],
-    Succ = get_successor(),
     Interval = hordad_lcf:get_var({hordad_ddb, finger_checker_interval}),
 
-    finger_checker(Succ, Ids, Interval).
+    case get_successor() of
+        undefined ->
+            timer:sleep(Interval),
+
+            finger_checker();
+        Succ ->
+            FT = get_finger_table(),
+            Ids = [Id || {Id, _} <- FT],
+
+            finger_checker(Succ, Ids, Interval)
+    end.
 
 finger_checker(_, [], _) ->
     finger_checker();

@@ -190,13 +190,18 @@ acceptor(Listener) ->
 
     hordad_log:info(?MODULE, "Connection accepted from ~p:~p", [IP, Port]),
 
-    case is_valid_peer_cert(Socket, IP) of
-        false ->
-            ssl:close(Socket),
+    if
+        SSLMode == true ->
+            case is_valid_peer_cert(Socket, IP) of
+                false ->
+                    ssl:close(Socket),
 
-            hordad_log:warning(?MODULE,
-              "Invalid client certificate", []),
-            exit(normal);
+                    hordad_log:warning(?MODULE,
+                                       "Invalid client certificate", []),
+                    exit(normal);
+                true ->
+                    ok
+            end;
         true ->
             ok
     end,
