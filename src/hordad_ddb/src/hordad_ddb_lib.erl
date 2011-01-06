@@ -48,10 +48,10 @@ make_node(IP, Port) ->
 
 is_node_in_range(From, To, Id) ->
     if
-        Id > From andalso Id =< To ->
+        Id >= From andalso Id =< To ->
             true;
         % Circular transition
-        To < From andalso (Id > From orelse Id =< To) ->
+        To < From andalso (Id >= From orelse Id =< To) ->
             true;
         true ->
             false

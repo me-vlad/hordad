@@ -73,7 +73,7 @@ get_self() ->
     gen_server:call(?SERVER, get_self).
 
 %% @doc Get current node's successor
--spec(get_successor() -> #node{} | undefined).
+-spec(get_successor() -> #node{}).
 
 get_successor() ->
     gen_server:call(?SERVER, get_successor).
@@ -96,8 +96,8 @@ service_handler({"find_successors", Ids}, _Socket) ->
     find_successors(Ids);
 service_handler("get_predecessor", _Socket) ->
     get_predecessor();
-service_handler({"pred_change", Node}, _Socket) ->
-    gen_server:call(?SERVER, {pred_change, Node}),
+service_handler({"notify", Node}, _Socket) ->
+    gen_server:call(?SERVER, {notify, Node}),
     ok.
 
 %%====================================================================
@@ -137,7 +137,7 @@ init([]) ->
 
     {ok, #state{
        self = Self,
-       successor = undefined,
+       successor = Self,
        predecessor = undefined,
        successor_list = [],
        join = init_join(Self),
@@ -167,8 +167,8 @@ handle_call(get_successor, _From, #state{successor=Succ}=State) ->
     {reply, Succ, State};
 handle_call(get_predecessor, _From, #state{predecessor=Pred}=State) ->
     {reply, Pred, State};
-handle_call({pred_change, Node}, _From, State) ->
-    {reply, ok, do_pred_change(Node, State)};
+handle_call({notify, Node}, _From, State) ->
+    {reply, ok, do_notify(Node, State)};
 handle_call({find_successors, Ids}, _From, State) ->
     {reply, do_find_successors(Ids, State), State};
 handle_call(get_finger_table, _From, #state{finger_table=FT}=State) ->
@@ -255,16 +255,11 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @doc Init join procedure
 init_join(Self) ->
-    case hordad_lcf:get_var({hordad_ddb, entry_point}, undefined) of
-        undefined ->
-            hordad_log:info(?MODULE, "Join: no entry point defined", []),
-            undefined;
-        {Ip, Port} ->
-            spawn_monitor(
-              fun() ->
-                      join(hordad_ddb_lib:make_node(Ip, Port), Self)
-              end)
-    end.
+    {IP, Port} = hordad_lcf:get_var({hordad_ddb, entry_point}),
+
+    spawn_monitor(fun() ->
+                          join(hordad_ddb_lib:make_node(IP, Port), Self)
+                  end).
 
 %% @doc Join network
 join(#node{ip=Ip, port=Port}=Entry, #node{id=Id}=Node) ->
@@ -312,29 +307,20 @@ collect_successors(Node, Rest, FoundAcc) ->
     end.
 
 %% @doc Workhouse for find_successors/1
-do_find_successors(Ids, #state{self=Self, successor=RawSucc}=State) ->
-    Succ = case RawSucc of
-               undefined ->
-                   Self;
-               _ ->
-                   RawSucc
-           end,
-
+do_find_successors(Ids, #state{self=Self, successor=Succ}=State) ->
     {Found, RawNotFound} =
         lists:foldr(
           fun(Id, {Found, NotFound}) ->
-                  InRange = hordad_ddb_lib:is_node_in_range(Self#node.id,
-                                                            Succ#node.id, Id),
-                  if
-                      %% Found successor or we don't have successor ourselves
-                      Succ == Self orelse InRange == true ->
+                  case hordad_ddb_lib:is_node_in_range(Self#node.id,
+                                                       Succ#node.id, Id) of
+                      true ->
                           {[{Id, Succ} | Found], NotFound};
                       %% Search in finger table
-                      true ->
+                      false ->
                           Next = closest_preceding_node(Id, State),
                           Cur = hordad_lib:getv(Next, NotFound, []),
 
-                          {Found, hordad_lib:setv(Next, [Id | Cur])}
+                          {Found, hordad_lib:setv(Next, [Id | Cur], NotFound)}
                   end
           end, {[], []}, Ids),
 
@@ -392,33 +378,28 @@ stabilizer() ->
     timer:sleep(Interval),
 
     Self = get_self(),
+    Succ = get_successor(),
 
-    case get_successor() of
-        undefined ->
+    {ok, Pred} = session(Succ, ?SERVICE_TAG, "get_predecessor"),
+
+    if
+        Pred == undefined orelse Pred == Succ->
             ok;
-        Succ ->
-            {ok, Pred} = session(Succ, ?SERVICE_TAG, "get_predecessor"),
-
-            if
-                Pred == undefined ->
-                    {ok, ok} = session(Succ, ?SERVICE_TAG,
-                                       {"pred_change", Self});
+        true ->
+            case hordad_ddb_lib:is_node_in_range(Self#node.id,
+                                                 Succ#node.id,
+                                                 Pred#node.id) of
                 true ->
-                    case hordad_ddb_lib:is_node_in_range(Self#node.id,
-                                                         Succ#node.id,
-                                                         Pred#node.id) of
-                        true ->
-                            {ok, ok} = session(Pred, ?SERVICE_TAG,
-                                               {"pred_change", Self}),
+                    hordad_log:info(?MODULE, "Stabilizer found new "
+                                    "successor: ~p", [Pred]),
 
-                            hordad_log:info(?MODULE,
-                                            "Stabilizer found new "
-                                            "successor: ~p", [Pred]),
-
-                            set_successor(Pred)
-                    end
+                    set_successor(Pred);
+                _ ->
+                    ok
             end
     end,
+
+    {ok, ok} = session(get_successor(), ?SERVICE_TAG, {"notify", Self}),
 
     stabilizer().
 
@@ -453,18 +434,11 @@ predecessor_checker() ->
 
 finger_checker() ->
     Interval = hordad_lcf:get_var({hordad_ddb, finger_checker_interval}),
+    Succ = get_successor(),
+    FT = get_finger_table(),
+    Ids = [Id || {Id, _} <- FT],
 
-    case get_successor() of
-        undefined ->
-            timer:sleep(Interval),
-
-            finger_checker();
-        Succ ->
-            FT = get_finger_table(),
-            Ids = [Id || {Id, _} <- FT],
-
-            finger_checker(Succ, Ids, Interval)
-    end.
+    finger_checker(Succ, Ids, Interval).
 
 finger_checker(_, [], _) ->
     finger_checker();
@@ -495,9 +469,9 @@ session(#node{ip=IP, port=Port}, Tag, Service) ->
     hordad_lib_net:gen_session(?MODULE, IP, Port, Tag, Service, Timeout).
 
 %% @doc Check for possible predecessor change
--spec(do_pred_change(#node{}, #state{}) -> #state{}).
+-spec(do_notify(#node{}, #state{}) -> #state{}).
 
-do_pred_change(Node, #state{predecessor=Pred, self=Self}=State) ->
+do_notify(Node, #state{predecessor=Pred, self=Self}=State) ->
     if
         Pred == undefined ->
             State#state{predecessor=Node};

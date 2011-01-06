@@ -19,10 +19,10 @@
 -define(MODULO, 1461501637330902918203684832716283019655932542976).
 
 -record(node, {
-          id,     % Node ID (node_id())
-          id_str, % Node ID (string())
           ip,     % Node IP,
-          port    % Node port
+          port,   % Node port
+          id,     % Node ID (node_id())
+          id_str  % Node ID (string())
          }).
 
 -endif.

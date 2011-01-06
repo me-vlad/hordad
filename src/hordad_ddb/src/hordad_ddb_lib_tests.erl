@@ -14,6 +14,7 @@ is_node_in_range_test() ->
     Fun = fun hordad_ddb_lib:is_node_in_range_test/3,
 
     ?assertEqual(true, Fun(70, 110, 90)),
+    ?assertEqual(true, Fun(70, 110, 70)),
     ?assertEqual(true, Fun(110, 50, 111)),
     ?assertEqual(true, Fun(110, 50, 10)),
     ?assertEqual(true, Fun(110, 50, 50)),
