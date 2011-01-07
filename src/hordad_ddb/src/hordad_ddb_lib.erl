@@ -35,7 +35,7 @@ id_str2num(Id) when is_list(Id) ->
 -spec(make_node(tuple(), integer()) -> #node{}).
              
 make_node(IP, Port) ->
-    StrID = gen_id(IP),
+    StrID = gen_id({IP, Port}),
     NumID = id_str2num(StrID),
 
     #node{id=NumID,

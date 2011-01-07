@@ -144,7 +144,7 @@ init([]) ->
        finger_table = init_finger_table(Self#node.id),
        stabilizer = init_stabilizer(),
        predecessor_checker = init_predecessor_checker(),
-       finger_checker = init_finger_checker()
+       finger_checker = undefined %init_finger_checker()
       }
     }.
 
@@ -275,7 +275,8 @@ join(#node{ip=Ip, port=Port}=Entry, #node{id=Id}=Node) ->
 
             join(Entry, Node);
         [{Id, Succ}] when is_record(Succ, node)  ->
-            hordad_log:info(?MODULE, "Found successor: ~p", [Succ]),
+            hordad_log:info(?MODULE, "Found successor: ~p:~p (~p)",
+                            [Succ#node.ip, Succ#node.port, Succ#node.id_str]),
 
             set_successor(Succ)
     end.
@@ -311,12 +312,14 @@ do_find_successors(Ids, #state{self=Self, successor=Succ}=State) ->
     {Found, RawNotFound} =
         lists:foldr(
           fun(Id, {Found, NotFound}) ->
-                  case hordad_ddb_lib:is_node_in_range(Self#node.id,
-                                                       Succ#node.id, Id) of
-                      true ->
+                  InRange = hordad_ddb_lib:is_node_in_range(
+                              Self#node.id, Succ#node.id, Id),
+
+                  if
+                      Succ == Self orelse InRange == true ->
                           {[{Id, Succ} | Found], NotFound};
                       %% Search in finger table
-                      false ->
+                      true ->
                           Next = closest_preceding_node(Id, State),
                           Cur = hordad_lib:getv(Next, NotFound, []),
 
@@ -383,7 +386,7 @@ stabilizer() ->
     {ok, Pred} = session(Succ, ?SERVICE_TAG, "get_predecessor"),
 
     if
-        Pred == undefined orelse Pred == Succ->
+        Pred == undefined orelse Pred == Succ ->
             ok;
         true ->
             case hordad_ddb_lib:is_node_in_range(Self#node.id,
@@ -474,17 +477,22 @@ session(#node{ip=IP, port=Port}, Tag, Service) ->
 do_notify(Node, #state{predecessor=Pred, self=Self}=State) ->
     if
         Pred == undefined ->
-            State#state{predecessor=Node};
+            if
+                Node /= Self ->
+                    State#state{predecessor=Node};
+                true ->
+                    State
+            end;
         true ->
             InRange = hordad_ddb_lib:is_node_in_range(
                         Pred#node.id,
                         Self#node.id,
                         Node#node.id),
 
-            case InRange of
-                true ->
+            if
+                Node /= Self andalso InRange == true ->
                     State#state{predecessor=Node};
-                false ->
+                true ->
                     State
             end
     end.

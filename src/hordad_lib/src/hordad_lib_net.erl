@@ -19,7 +19,7 @@
          read_socket/3,
          read_socket/4,
          close_socket/2,
-         read_extract_socket/4,
+         read_message/3,
          write_socket/3,
          rw_loop/3,
          connect/2,
@@ -35,6 +35,7 @@
         ]).
 
 -define(HEADER_SIZE, 32).
+-define(MAX_MESSAGE_SIZE, 65536).
 
 -type(ip_address() :: {integer(), integer(), integer(), integer()}).
 -type(address() :: string() | ip_address()).
@@ -43,7 +44,7 @@
 -spec(protocol_version() -> binary()).
 
 protocol_version() ->
-    <<1>>.
+    <<2>>.
 
 %% @doc Get total header size
 -spec(header_size() -> integer()).
@@ -53,7 +54,7 @@ header_size() ->
 
 %% Make binary header
 %% Header format is following:
-%% Hordad protocol version - 1 byte (currently - 1)
+%% Hordad protocol version - 1 byte
 %% Service tag length - 1 byte
 %% Service tag - up to 30 bytes
 %% Optional padding to 32 bytes in total.
@@ -71,9 +72,14 @@ make_header(Tag) when is_list(Tag) ->
 
 %% @doc Make message, suitable for transfering over network
 -spec(make_message(iolist()) -> binary()).
-             
+
 make_message(Message) ->
-    term_to_binary(Message).
+    Msg = term_to_binary(Message),
+    Size = byte_size(Msg),
+
+    true = Size =< ?MAX_MESSAGE_SIZE,
+
+    <<Size:16, Msg/binary>>.
 
 %% @doc Extract service tag from binary header
 -spec(extract_header(binary()) -> {Version :: integer(), Tag :: tag()}).
@@ -89,14 +95,15 @@ extract_message(RawMessage) when is_binary(RawMessage) ->
     binary_to_term(RawMessage).
 
 %% @doc Read data from socket
--spec(read_socket(atom(), port(), integer()) -> ok | closed | error).
-              
+-spec(read_socket(atom(), port(), integer()) -> {ok, binary()}
+                                                    | closed | error).
+
 read_socket(Module, Socket, Size) ->
     read_socket(Module, Socket, Size, infinity).
 
 %% @doc Read data from socket
 -spec(read_socket(atom(), port(), integer(), timeout()) ->
-             ok | closed | error).
+             {ok, binary()} | closed | error).
 
 read_socket(Module, Socket, Size, Timeout) ->
     RecvF = case is_ssl_mode() of
@@ -111,19 +118,31 @@ read_socket(Module, Socket, Size, Timeout) ->
             hordad_log:info(Module, "Client connection closed", []),
             closed;
         {error, Reason} ->
-            hordad_log:error(Module, "Client read error: ~9999p", [Reason]),
+            hordad_log:error(Module, "Client read error: ~p", [Reason]),
             error;
         {ok, Data} ->
             {ok, Data}
     end.
 
-%% @doc Acts the same way as read_socket/4 but additionaly extracts message
-read_extract_socket(Module, Socket, Size, Timeout) ->
-    case read_socket(Module, Socket, Size, Timeout) of
-        {ok, Raw} ->
-            {ok, extract_message(Raw)};
-        Else ->
-            Else
+%% @doc Read complete message according to hordad binary protocol
+%% Each chunk starts with two-bytes chunk length followed by actual data
+read_message(Module, Socket, Timeout) ->
+    read_message(Module, Socket, Timeout, <<>>, 0).
+
+read_message(_, _, _, Buffer, 0) when Buffer /= <<>> ->
+    {ok, extract_message(Buffer)};
+read_message(Module, Socket, Timeout, Buffer, Rest) ->
+    Chunk = read_socket(Module, Socket, 0, Timeout),
+
+    case Chunk of
+        {ok, <<Size:16/integer, Data/binary>>} when Buffer == <<>> ->
+            read_message(Module, Socket, Timeout, Data,
+                         Size - byte_size(Data));
+        {ok, Data} ->
+            read_message(Module, Socket, Timeout,
+                       <<Buffer/binary, Data/binary>>, Rest - byte_size(Data));
+        E ->
+            E
     end.
 
 %% @doc Send data to clien
@@ -139,7 +158,7 @@ write_socket(Module, Socket, Packet) ->
 
     case SendF(Socket, Packet) of
         {error, Reason} ->
-            hordad_log:error(Module, "Client send error: ~9999p", [Reason]),
+            hordad_log:error(Module, "Client send error: ~p", [Reason]),
             error;
         ok ->
             ok
@@ -158,7 +177,7 @@ close_socket(Module, Socket) ->
 
     case CloseF(Socket) of
         {error, Reason} ->
-            hordad_log:error(Module, "Error closing socket: ~9999p", [Reason]),
+            hordad_log:error(Module, "Error closing socket: ~p", [Reason]),
             error;
         ok ->
             ok
@@ -171,11 +190,11 @@ close_socket(Module, Socket) ->
 -spec(rw_loop(atom(), port(), function()) -> ok | error).
 
 rw_loop(Module, Socket, Cb) ->
-    case read_socket(Module, Socket, 0) of
+    case read_message(Module, Socket, infinity) of
         X when X == error orelse X == closed ->
             ok;
-        {ok, RawData} ->
-            Response = Cb(extract_message(RawData), Socket),
+        {ok, Data} ->
+            Response = Cb(Data, Socket),
 
             case write_socket(Module, Socket, make_message(Response)) of
                 ok -> 
@@ -227,7 +246,7 @@ gen_session(Module, Node, Port, Header, Message, Timeout) ->
         {ok, S} = connect(Node, Port, Timeout),
         ok = write_socket(Module, S, make_header(Header)),
         ok = write_socket(Module, S, make_message(Message)),
-        {ok, R} = read_extract_socket(Module, S, 0, Timeout),
+        {ok, R} = read_message(Module, S, Timeout),
         close_socket(Module, S),
         
         {ok, R}
