@@ -12,7 +12,8 @@
          gen_id/1,
          id_str2num/1,
          make_node/2,
-         is_node_in_range/3
+         between_right_inc/3,
+         between/3
         ]).
 
 -include("hordad_ddb_lookup.hrl").
@@ -43,15 +44,35 @@ make_node(IP, Port) ->
           port=Port,
           ip=IP}.
 
-%% @doc Check if provided node Id lies in range in circular id space
--spec(is_node_in_range(integer(), integer(), integer) -> boolean()).
+%% @doc Check if provided Id lies in range in circular id space 
+%% (From, To]
+-spec(between_right_inc(integer(), integer(), integer) -> boolean()).
 
-is_node_in_range(From, To, Id) ->
+between_right_inc(From, To, Id) ->
     if
-        Id >= From andalso Id =< To ->
+        From == To andalso Id == From ->
+            true;
+        Id > From andalso Id =< To ->
             true;
         % Circular transition
-        To < From andalso (Id >= From orelse Id =< To) ->
+        To < From andalso (Id > From orelse Id =< To) ->
+            true;
+        true ->
+            false
+    end.
+
+-spec(between(integer(), integer(), integer) -> boolean()).
+
+%% @doc Check if provided Id lies in range in circular id space 
+%% (From, To)
+between(From, To, Id) ->
+    if
+        From == To ->
+            Id /= From;
+        Id > From andalso Id < To ->
+            true;
+        % Circular transition
+        To < From andalso (Id > From orelse Id < To) ->
             true;
         true ->
             false

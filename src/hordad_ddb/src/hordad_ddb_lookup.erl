@@ -30,7 +30,7 @@
 
 -define(SERVER, ?MODULE).
 -define(SERVICE_TAG, "ddb_lookup").
--define(JOIN_RETRY_INTERVAL, 5000).
+-define(ERROR_RETRY_INTERVAL, 5000).
 
 -record(state, {
           self,
@@ -97,7 +97,18 @@ service_handler({"find_successors", Ids}, _Socket) ->
 service_handler("get_predecessor", _Socket) ->
     get_predecessor();
 service_handler({"notify", Node}, _Socket) ->
-    gen_server:call(?SERVER, {notify, Node}),
+    gen_server:call(?SERVER, {notify, Node});
+service_handler({"join", Node}, _Socket) ->
+    Succ = get_successor(),
+    Self = get_self(),
+
+    if
+        Node /= Self andalso Succ == Self ->
+            set_successor(Node);
+        true ->
+            ok
+    end,
+
     ok.
 
 %%====================================================================
@@ -158,7 +169,7 @@ init([]) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 handle_call({set_successor, Node}, _From, State) ->
-    {reply, ok, State#state{successor=Node}};
+    {reply, ok, do_set_successor(Node, State)};
 handle_call({set_predecessor, Node}, _From, State) ->
     {reply, ok, State#state{predecessor=Node}};
 handle_call(get_self, _From, #state{self=Self}=State) ->
@@ -262,7 +273,7 @@ init_join(Self) ->
                   end).
 
 %% @doc Join network
-join(#node{ip=Ip, port=Port}=Entry, #node{id=Id}=Node) ->
+join(#node{ip=Ip, port=Port}=Entry, #node{id=Id}=Self) ->
     hordad_log:info(?MODULE, "Trying to join existing overlay network "
                     "using ~p:~p as entry point", [Ip, Port]),
 
@@ -271,13 +282,14 @@ join(#node{ip=Ip, port=Port}=Entry, #node{id=Id}=Node) ->
             hordad_log:error(?MODULE, "Unable to join overlay network: ~p",
                              [Reason]),
 
-            timer:sleep(?JOIN_RETRY_INTERVAL),
+            timer:sleep(?ERROR_RETRY_INTERVAL),
 
-            join(Entry, Node);
+            join(Entry, Self);
         [{Id, Succ}] when is_record(Succ, node)  ->
             hordad_log:info(?MODULE, "Found successor: ~p:~p (~p)",
                             [Succ#node.ip, Succ#node.port, Succ#node.id_str]),
 
+            spawn(fun() -> notify_successor(Succ, Self) end),
             set_successor(Succ)
     end.
 
@@ -312,18 +324,26 @@ do_find_successors(Ids, #state{self=Self, successor=Succ}=State) ->
     {Found, RawNotFound} =
         lists:foldr(
           fun(Id, {Found, NotFound}) ->
-                  InRange = hordad_ddb_lib:is_node_in_range(
+                  InRange = hordad_ddb_lib:between_right_inc(
                               Self#node.id, Succ#node.id, Id),
 
                   if
-                      Succ == Self orelse InRange == true ->
+                      InRange == true ->
                           {[{Id, Succ} | Found], NotFound};
                       %% Search in finger table
                       true ->
                           Next = closest_preceding_node(Id, State),
-                          Cur = hordad_lib:getv(Next, NotFound, []),
 
-                          {Found, hordad_lib:setv(Next, [Id | Cur], NotFound)}
+                          if
+                              %% No other node found, return self
+                              Next == Self ->
+                                  {[{Id, Self} | Found], NotFound};
+                              true ->
+                                  Cur = hordad_lib:getv(Next, NotFound, []),
+
+                                  {Found,
+                                   hordad_lib:setv(Next, [Id | Cur], NotFound)}
+                          end
                   end
           end, {[], []}, Ids),
 
@@ -343,7 +363,7 @@ find_preceding_node(_, _, [], Def) ->
     Def;
 find_preceding_node(Id, SelfId, [{_, Node} | T], Def)
   when is_record(Node, node) ->
-    case hordad_ddb_lib:is_node_in_range(SelfId, Id, Node#node.id) of
+    case hordad_ddb_lib:between(SelfId, Id, Node#node.id) of
         true ->
             Node;
         _ ->
@@ -368,8 +388,7 @@ init_finger_checker() ->
 -spec(init_finger_table(node_id()) -> finger_table()).
 
 init_finger_table(Id) ->
-    [{Id + round(math:pow(2, X - 1)) rem ?MODULO, undefined} ||
-        X <- lists:seq(0, ?M)].
+    [Id + round(math:pow(2, X - 1)) rem ?MODULO || X <- lists:seq(1, ?M)].
 
 %% @doc Stabilizer function
 %% Run periodically to check if new node appeared between current node and its
@@ -386,15 +405,16 @@ stabilizer() ->
     {ok, Pred} = session(Succ, ?SERVICE_TAG, "get_predecessor"),
 
     if
-        Pred == undefined orelse Pred == Succ ->
+        Pred == undefined orelse Pred == Succ orelse Pred == Self ->
             ok;
         true ->
-            case hordad_ddb_lib:is_node_in_range(Self#node.id,
-                                                 Succ#node.id,
-                                                 Pred#node.id) of
+            case hordad_ddb_lib:between_right_inc(Self#node.id, Succ#node.id,
+                                                  Pred#node.id) of
                 true ->
-                    hordad_log:info(?MODULE, "Stabilizer found new "
-                                    "successor: ~p", [Pred]),
+                    hordad_log:info(?MODULE, "Stabilizer found new successor: "
+                                    "~p:~p (~p)",
+                                    [Pred#node.ip, Pred#node.port,
+                                     Pred#node.id_str]),
 
                     set_successor(Pred);
                 _ ->
@@ -437,11 +457,11 @@ predecessor_checker() ->
 
 finger_checker() ->
     Interval = hordad_lcf:get_var({hordad_ddb, finger_checker_interval}),
-    Succ = get_successor(),
+    Self = get_self(),
     FT = get_finger_table(),
     Ids = [Id || {Id, _} <- FT],
 
-    finger_checker(Succ, Ids, Interval).
+    finger_checker(Self, Ids, Interval).
 
 finger_checker(_, [], _) ->
     finger_checker();
@@ -475,24 +495,50 @@ session(#node{ip=IP, port=Port}, Tag, Service) ->
 -spec(do_notify(#node{}, #state{}) -> #state{}).
 
 do_notify(Node, #state{predecessor=Pred, self=Self}=State) ->
+    LogF = fun(#node{ip=IP, port=Port, id_str=Id}) ->
+                   hordad_log:info(?MODULE, "New predecessor: "
+                                   "~p:~p (~p)", [IP, Port, Id])
+           end,
+
     if
+        %% Its ourselves, ignore.
+        Node == Self ->
+            State;
+        %% New node recently joined
         Pred == undefined ->
-            if
-                Node /= Self ->
-                    State#state{predecessor=Node};
-                true ->
-                    State
-            end;
+            LogF(Node),
+            State#state{predecessor=Node};
+        %% Our current predecessor
+        Node == Pred ->
+            State;
         true ->
-            InRange = hordad_ddb_lib:is_node_in_range(
-                        Pred#node.id,
-                        Self#node.id,
-                        Node#node.id),
+            InRange = hordad_ddb_lib:between_right_inc(
+                        Pred#node.id, Self#node.id, Node#node.id),
 
             if
-                Node /= Self andalso InRange == true ->
+                InRange == true ->
+                    LogF(Node),
                     State#state{predecessor=Node};
                 true ->
                     State
             end
+    end.
+
+%% @doc Workhouse for set_successor/1
+-spec(do_set_successor(#node{}, #state{}) -> #state{}).
+
+do_set_successor(Node, State) ->
+    State#state{successor=Node}.
+
+%% @doc Notify succesor of our arrival
+notify_successor(Succ, Self) ->
+    case session(Succ, ?SERVICE_TAG, {"join", Self}) of
+        {error, E} ->
+            hordad_log:warning(?MODULE, "Error notifying successor: ~p. "
+                               "Retrying.", [E]),
+            timer:sleep(?ERROR_RETRY_INTERVAL),
+
+            notify_successor(Succ, Self);
+        {ok, ok} ->
+            ok
     end.

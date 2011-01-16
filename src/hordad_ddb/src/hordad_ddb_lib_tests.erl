@@ -10,17 +10,28 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-is_node_in_range_test() ->
-    Fun = fun hordad_ddb_lib:is_node_in_range_test/3,
+between_right_inc_test() ->
+    Fun = fun hordad_ddb_lib:between_right_inc/3,
 
     ?assertEqual(true, Fun(70, 110, 90)),
-    ?assertEqual(true, Fun(70, 110, 70)),
     ?assertEqual(true, Fun(110, 50, 111)),
     ?assertEqual(true, Fun(110, 50, 10)),
     ?assertEqual(true, Fun(110, 50, 50)),
 
+    ?assertEqual(false, Fun(70, 110, 70)),
     ?assertEqual(false, Fun(110, 50, 51)),
-    ?assertEqual(false, Fun(70, 120, 70)),
+    ?assertEqual(false, Fun(90, 10, 50)).
+
+between_test() ->
+    Fun = fun hordad_ddb_lib:between/3,
+
+    ?assertEqual(true, Fun(70, 110, 90)),
+    ?assertEqual(true, Fun(110, 50, 111)),
+    ?assertEqual(true, Fun(110, 50, 10)),
+
+    ?assertEqual(false, Fun(110, 50, 50)),
+    ?assertEqual(false, Fun(70, 110, 70)),
+    ?assertEqual(false, Fun(110, 50, 51)),
     ?assertEqual(false, Fun(90, 10, 50)).
 
 gen_id_test() ->
