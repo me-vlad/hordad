@@ -115,7 +115,7 @@ read_socket(Module, Socket, Size, Timeout) ->
 
     case RecvF(Socket, Size, Timeout) of
         {error, closed} ->
-            hordad_log:info(Module, "Client connection closed", []),
+            hordad_log:debug(Module, "Client connection closed", []),
             closed;
         {error, Reason} ->
             hordad_log:error(Module, "Client read error: ~p", [Reason]),

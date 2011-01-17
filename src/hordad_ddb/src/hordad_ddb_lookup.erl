@@ -17,7 +17,7 @@
          get_self/0,
          get_successor/0,
          get_predecessor/0,
-         find_successors/1
+         lookup/1
         ]).
 
 %% gen_server callbacks
@@ -84,16 +84,30 @@ get_successor() ->
 get_predecessor() ->
     gen_server:call(?SERVER, get_predecessor).
 
-%% @doc Find successors for provided Ids
--spec(find_successors([node_id()]) -> {Found :: [{node_id(), #node{}}],
-                                       NotFound :: [{#node{}, [node_id()]}]}).
+%% @doc Find successor nodes for provided Ids
+-spec(lookup(node_id() | [node_id()]) -> {ok, #node{} | [#node{}]}
+                                             | {error, any()}).
 
-find_successors(Ids) ->
-    gen_server:call(?SERVER, {find_successors, lists:usort(Ids)}).
+lookup(Id) when is_integer(Id) ->
+    case lookup([Id]) of
+        {error, _}=E ->
+            E;
+        [#node{}=Succ] ->
+            {ok, Succ}
+    end;
+lookup(Ids) ->
+    Self = get_self(),
+
+    case collect_successors(Self, Ids) of
+        {error, Reason, _, _, _} ->
+            {error, Reason};
+        Nodes ->
+            {ok, Nodes}
+    end.
 
 %% @doc Service handler callback
-service_handler({"find_successors", Ids}, _Socket) ->
-    find_successors(Ids);
+service_handler({"find_successor", Ids}, _Socket) ->
+    gen_server:call(?SERVER, {find_successor, lists:usort(Ids)});
 service_handler("get_predecessor", _Socket) ->
     get_predecessor();
 service_handler({"notify", Node}, _Socket) ->
@@ -103,6 +117,7 @@ service_handler({"join", Node}, _Socket) ->
     Self = get_self(),
 
     if
+        %% Bootstrap node case
         Node /= Self andalso Succ == Self ->
             set_successor(Node);
         true ->
@@ -155,7 +170,7 @@ init([]) ->
        finger_table = init_finger_table(Self#node.id),
        stabilizer = init_stabilizer(),
        predecessor_checker = init_predecessor_checker(),
-       finger_checker = undefined %init_finger_checker()
+       finger_checker = init_finger_checker()
       }
     }.
 
@@ -180,8 +195,8 @@ handle_call(get_predecessor, _From, #state{predecessor=Pred}=State) ->
     {reply, Pred, State};
 handle_call({notify, Node}, _From, State) ->
     {reply, ok, do_notify(Node, State)};
-handle_call({find_successors, Ids}, _From, State) ->
-    {reply, do_find_successors(Ids, State), State};
+handle_call({find_successor, Ids}, _From, State) ->
+    {reply, do_find_successor(Ids, State), State};
 handle_call(get_finger_table, _From, #state{finger_table=FT}=State) ->
     {reply, FT, State};
 handle_call({update_finger_table, Values}, _From,
@@ -305,7 +320,7 @@ collect_successors(Node, Rest) ->
 collect_successors(_, [], FoundAcc) ->
     FoundAcc;
 collect_successors(Node, Rest, FoundAcc) ->
-    case session(Node, ?SERVICE_TAG, {"find_successors", Rest}) of
+    case session(Node, ?SERVICE_TAG, {"find_successor", Rest}) of
         {error, E} ->
             {error, E, Node, Rest, FoundAcc};
         {ok, {Found, NotFound}} ->
@@ -319,8 +334,8 @@ collect_successors(Node, Rest, FoundAcc) ->
             end
     end.
 
-%% @doc Workhouse for find_successors/1
-do_find_successors(Ids, #state{self=Self, successor=Succ}=State) ->
+%% @doc Workhouse for find_successor/1
+do_find_successor(Ids, #state{self=Self, successor=Succ}=State) ->
     {Found, RawNotFound} =
         lists:foldr(
           fun(Id, {Found, NotFound}) ->
@@ -388,7 +403,8 @@ init_finger_checker() ->
 -spec(init_finger_table(node_id()) -> finger_table()).
 
 init_finger_table(Id) ->
-    [Id + round(math:pow(2, X - 1)) rem ?MODULO || X <- lists:seq(1, ?M)].
+    [{Id + round(math:pow(2, X - 1)) rem ?MODULO, undefined} ||
+        X <- lists:seq(1, ?M)].
 
 %% @doc Stabilizer function
 %% Run periodically to check if new node appeared between current node and its
@@ -504,13 +520,13 @@ do_notify(Node, #state{predecessor=Pred, self=Self}=State) ->
         %% Its ourselves, ignore.
         Node == Self ->
             State;
+        %% Our current predecessor
+        Node == Pred ->
+            State;
         %% New node recently joined
         Pred == undefined ->
             LogF(Node),
             State#state{predecessor=Node};
-        %% Our current predecessor
-        Node == Pred ->
-            State;
         true ->
             InRange = hordad_ddb_lib:between_right_inc(
                         Pred#node.id, Self#node.id, Node#node.id),
