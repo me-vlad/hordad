@@ -17,6 +17,8 @@
          get_self/0,
          get_successor/0,
          get_predecessor/0,
+         get_full_circle/0,
+         get_full_circle/1,
          lookup/1
         ]).
 
@@ -92,22 +94,46 @@ lookup(Id) when is_integer(Id) ->
     case lookup([Id]) of
         {error, _}=E ->
             E;
-        [#node{}=Succ] ->
+        {ok, [#node{}=Succ]} ->
             {ok, Succ}
     end;
-lookup(Ids) ->
+lookup(Ids) when is_list(Ids) ->
     Self = get_self(),
 
     case collect_successors(Self, Ids) of
         {error, Reason, _, _, _} ->
             {error, Reason};
         Nodes ->
-            {ok, Nodes}
+            {ok, [N || {_, N} <- Nodes]}
+    end.
+
+%% @doc Get list of all nodes in the circle starting with current one
+-spec(get_full_circle() -> [#node{}]).
+
+get_full_circle() ->
+    get_full_circle(get_self()).
+
+%% @doc Get list of all nodes in the circle starting with provided one
+-spec(get_full_circle(#node{}) -> [#node{}]).
+
+get_full_circle(StartNode) ->
+    get_full_circle(StartNode, StartNode, []).
+
+get_full_circle(StartNode, StartNode, [_|_]=Acc) ->
+    lists:reverse(Acc);
+get_full_circle(Node, StartNode, Acc) ->
+    case session(Node, ?SERVICE_TAG, "get_successor") of
+        {ok, Succ} ->
+            get_full_circle(Succ, StartNode, [Succ | Acc]);
+        _ ->
+            get_full_circle(StartNode, StartNode, Acc)
     end.
 
 %% @doc Service handler callback
 service_handler({"find_successor", Ids}, _Socket) ->
     gen_server:call(?SERVER, {find_successor, lists:usort(Ids)});
+service_handler("get_successor", _Socket) ->
+    get_successor();
 service_handler("get_predecessor", _Socket) ->
     get_predecessor();
 service_handler({"notify", Node}, _Socket) ->
@@ -558,3 +584,4 @@ notify_successor(Succ, Self) ->
         {ok, ok} ->
             ok
     end.
+

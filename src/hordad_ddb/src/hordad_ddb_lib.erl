@@ -13,14 +13,15 @@
          id_str2num/1,
          make_node/2,
          between_right_inc/3,
-         between/3
+         between/3,
+         visualize_circle/1
         ]).
 
 -include("hordad_ddb_lookup.hrl").
 
 %% @doc Generate hash id for data
 -spec(gen_id(Data :: any()) -> string()).
-         
+
 gen_id(Data) ->
     lists:flatten(
       [io_lib:format("~2.16.0b", [N]) ||
@@ -34,7 +35,7 @@ id_str2num(Id) when is_list(Id) ->
 
 %% @doc Generate node id
 -spec(make_node(tuple(), integer()) -> #node{}).
-             
+
 make_node(IP, Port) ->
     StrID = gen_id({IP, Port}),
     NumID = id_str2num(StrID),
@@ -44,7 +45,7 @@ make_node(IP, Port) ->
           port=Port,
           ip=IP}.
 
-%% @doc Check if provided Id lies in range in circular id space 
+%% @doc Check if provided Id lies in range in circular id space
 %% (From, To]
 -spec(between_right_inc(integer(), integer(), integer) -> boolean()).
 
@@ -63,7 +64,7 @@ between_right_inc(From, To, Id) ->
 
 -spec(between(integer(), integer(), integer) -> boolean()).
 
-%% @doc Check if provided Id lies in range in circular id space 
+%% @doc Check if provided Id lies in range in circular id space
 %% (From, To)
 between(From, To, Id) ->
     if
@@ -77,3 +78,54 @@ between(From, To, Id) ->
         true ->
             false
     end.
+
+%% @doc Generate graphviz file describing current ddb ring
+-spec(visualize_circle(string()) -> ok | {error, any()}).
+
+visualize_circle(Path) ->
+    IdF = fun(N) ->
+                 string:left(N#node.id_str, 8)
+         end,
+
+    FmtNode = fun(Id, Node) ->
+                      lists:flatten(
+                        io_lib:format("~p[shape=doublecircle, "
+                                      "label=\"IP=~p:~p\\nId=~s\"]~n",
+                                      [Id, Node#node.ip,
+                                       Node#node.port, Id]))
+              end,
+
+    FmtEdge = fun(From, To) ->
+                      lists:flatten(io_lib:format("~p -> ~p~n", [From, To]))
+              end,
+
+    [First | _] = Nodes = hordad_ddb_lookup:get_full_circle(),
+
+    Data0 = ["digraph hordad_ddb {\n"],
+
+    {Data1, Last} =
+        lists:foldl(
+          fun(Node, {Acc, Pred}) ->
+                  CId = IdF(Node),
+                  C = FmtNode(CId, Node),
+
+                  NewAcc = case Pred of
+                               undefined ->
+                                   [C | Acc];
+                               _ ->
+                                   PId = IdF(Pred),
+
+                                   [C, FmtEdge(PId, CId),
+                                    FmtEdge(CId, PId) | Acc]
+                           end,
+
+                  {NewAcc, Node}
+          end, {Data0, undefined}, Nodes),
+
+    L = IdF(Last),
+    F = IdF(First),
+
+    Data2 = [FmtEdge(F, L), FmtEdge(L, F) | Data1],
+
+    %% Now connect last node with the first one
+    file:write_file(Path, lists:reverse(["};" | Data2])).
