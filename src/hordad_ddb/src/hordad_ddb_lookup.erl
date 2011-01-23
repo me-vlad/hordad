@@ -108,13 +108,13 @@ lookup(Ids) when is_list(Ids) ->
     end.
 
 %% @doc Get list of all nodes in the circle starting with current one
--spec(get_full_circle() -> [#node{}]).
+-spec(get_full_circle() -> [node_info()]).
 
 get_full_circle() ->
     get_full_circle(get_self()).
 
 %% @doc Get list of all nodes in the circle starting with provided one
--spec(get_full_circle(#node{}) -> [#node{}]).
+-spec(get_full_circle(#node{}) -> [node_info()]).
 
 get_full_circle(StartNode) ->
     get_full_circle(StartNode, StartNode, []).
@@ -122,9 +122,9 @@ get_full_circle(StartNode) ->
 get_full_circle(StartNode, StartNode, [_|_]=Acc) ->
     lists:reverse(Acc);
 get_full_circle(Node, StartNode, Acc) ->
-    case session(Node, ?SERVICE_TAG, "get_successor") of
-        {ok, Succ} ->
-            get_full_circle(Succ, StartNode, [Succ | Acc]);
+    case session(Node, ?SERVICE_TAG, "get_node_info") of
+        {ok, {_Pred, Node, Succ, _FT}=Info} ->
+            get_full_circle(Succ, StartNode, [Info | Acc]);
         _ ->
             get_full_circle(StartNode, StartNode, Acc)
     end.
@@ -138,6 +138,8 @@ service_handler("get_predecessor", _Socket) ->
     get_predecessor();
 service_handler({"notify", Node}, _Socket) ->
     gen_server:call(?SERVER, {notify, Node});
+service_handler("get_node_info", _Socket) ->
+    gen_server:call(?SERVER, get_node_info);
 service_handler({"join", Node}, _Socket) ->
     Succ = get_successor(),
     Self = get_self(),
@@ -221,6 +223,10 @@ handle_call(get_predecessor, _From, #state{predecessor=Pred}=State) ->
     {reply, Pred, State};
 handle_call({notify, Node}, _From, State) ->
     {reply, ok, do_notify(Node, State)};
+handle_call(get_node_info, _From,
+            #state{self=Self, successor=Succ,
+                   predecessor=Pred, finger_table=FT}=State) ->
+    {reply, {Pred, Self, Succ, compress_finger_table(FT)}, State};
 handle_call({find_successor, Ids}, _From, State) ->
     {reply, do_find_successor(Ids, State), State};
 handle_call(get_finger_table, _From, #state{finger_table=FT}=State) ->
@@ -431,6 +437,18 @@ init_finger_checker() ->
 init_finger_table(Id) ->
     [{Id + round(math:pow(2, X - 1)) rem ?MODULO, undefined} ||
         X <- lists:seq(1, ?M)].
+
+%% @doc Remove empty entries from finger table
+-spec(compress_finger_table(finger_table()) ->
+             [{Index :: integer(), #node{}}]).
+
+compress_finger_table(FT) ->
+    lists:foldr(fun({{_, undefined}, _}, Acc) ->
+                        Acc;
+                   ({{_, Succ}, Idx}, Acc) ->
+                        [{Idx, Succ} | Acc]
+                end, [],
+                lists:zip(FT, lists:seq(1, length(FT)))).
 
 %% @doc Stabilizer function
 %% Run periodically to check if new node appeared between current node and its

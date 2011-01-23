@@ -9,9 +9,6 @@
 -ifndef(HORDAD_DDB_LOOKUP_HRL).
 -define(HORDAD_DDB_LOOKUP_HRL, true).
 
--type(finger_table() :: list()).
--type(node_id() :: integer()).
-
 %% Keyspace length
 -define(M, 160).
 
@@ -26,3 +23,8 @@
          }).
 
 -endif.
+
+-type(finger_table() :: list()).
+-type(node_id() :: integer()).
+-type(node_info() :: {#node{}, #node{}, #node{}, finger_table()}).
+

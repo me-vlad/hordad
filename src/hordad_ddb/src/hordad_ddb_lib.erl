@@ -83,6 +83,7 @@ between(From, To, Id) ->
 -spec(visualize_circle(string()) -> ok | {error, any()}).
 
 visualize_circle(Path) ->
+
     IdF = fun(N) ->
                  string:left(N#node.id_str, 8)
          end,
@@ -90,8 +91,8 @@ visualize_circle(Path) ->
     FmtNode = fun(Id, Node) ->
                       lists:flatten(
                         io_lib:format("~p[shape=doublecircle, "
-                                      "label=\"IP=~p:~p\\nId=~s\"]~n",
-                                      [Id, Node#node.ip,
+                                      "label=\"IP=~s:~p\\nId=~s\"]~n",
+                                      [Id, hordad_lib_net:ip2str(Node#node.ip),
                                        Node#node.port, Id]))
               end,
 
@@ -99,33 +100,76 @@ visualize_circle(Path) ->
                       lists:flatten(io_lib:format("~p -> ~p~n", [From, To]))
               end,
 
-    [First | _] = Nodes = hordad_ddb_lookup:get_full_circle(),
+    Self = hordad_ddb_lookup:get_self(),
+    SelfId = IdF(Self),
 
-    Data0 = ["digraph hordad_ddb {\n"],
+    FmtFT = fun(Id, FTable) ->
+                    {Labels, Conns} = lists:foldr(
+                               fun({_, undefined}, {L, C}) ->
+                                       {L, C};
+                                  ({Idx, Succ}, {L, C}) ->
+                                       IP=hordad_lib_net:ip2str(Succ#node.ip),
+                                       SId = IdF(Succ),
 
-    {Data1, Last} =
-        lists:foldl(
-          fun(Node, {Acc, Pred}) ->
-                  CId = IdF(Node),
-                  C = FmtNode(CId, Node),
+                                       Lab = lists:flatten(
+                                         io_lib:format("~p: ~s:~p (~s)",
+                                                       [Idx,
+                                                        IP,
+                                                        Succ#node.port,
+                                                        SId])),
 
-                  NewAcc = case Pred of
-                               undefined ->
-                                   [C | Acc];
-                               _ ->
-                                   PId = IdF(Pred),
+                                       NewC = io_lib:format(
+                                                "~s [color=blue, "
+                                                "label=\"~p finger\"]",
+                                                [FmtEdge(Id, SId), Idx]),
 
-                                   [C, FmtEdge(PId, CId),
-                                    FmtEdge(CId, PId) | Acc]
-                           end,
+                                       {[Lab | L], [NewC | C]}
 
-                  {NewAcc, Node}
-          end, {Data0, undefined}, Nodes),
+                               end, {[], []}, FTable),
 
-    L = IdF(Last),
-    F = IdF(First),
+                    Entry = Id ++ "-ft",
 
-    Data2 = [FmtEdge(F, L), FmtEdge(L, F) | Data1],
+                    [io_lib:format("~p[shape=box, label=\"~s\"]~n",
+                                   [Entry, string:join(Labels, "\\n")]),
+                     io_lib:format("~p -> ~p~n", [Id, Entry])
+                    ] ++ if
+                             Id == SelfId ->
+                                 Conns;
+                             true ->
+                                 []
+                         end
+            end,
+
+    TruncateFT = fun(FT) ->
+                         lists:foldl(fun({_, Prev}, {Acc, Prev}) ->
+                                             {Acc, Prev};
+                                        ({_, New}=Entry, {Acc, _Prev}) ->
+                                             {[Entry | Acc], New}
+                                     end, {[], undefined}, FT)
+                 end,
+
+    Nodes = hordad_ddb_lookup:get_full_circle(),
+
+    Data = lists:foldl(
+             fun({Pred, Node, Succ, RawFT}, Acc) ->
+                     CId = IdF(Node),
+                     PId = IdF(Pred),
+                     SId = IdF(Succ),
+
+                     {FT, _} = TruncateFT(RawFT),
+
+                     [FmtNode(PId, Pred),
+                      FmtNode(CId, Node),
+                      FmtNode(SId, Succ),
+
+                      FmtEdge(PId, CId),
+                      FmtEdge(CId, PId),
+                      FmtEdge(CId, SId),
+                      FmtEdge(SId, CId),
+
+                      FmtFT(CId, lists:reverse(FT)) | Acc]
+             end, [], Nodes),
 
     %% Now connect last node with the first one
-    file:write_file(Path, lists:reverse(["};" | Data2])).
+    file:write_file(Path, (["digraph hordad_ddb_ring {\n" |
+                            lists:usort(Data)] ++ ["};"])).
