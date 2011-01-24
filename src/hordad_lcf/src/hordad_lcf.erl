@@ -22,11 +22,11 @@
          reload/0
         ]).
 
--include_lib("hordad_rooms/include/rooms.hrl").
-
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
+
+-define(ROOM, ?MODULE).
 
 %%====================================================================
 %% API
@@ -94,6 +94,8 @@ set_var(Var, Val) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
+    hordad_rooms:create(?ROOM),
+
     case load_config() of
         {ok, Data} ->
             {ok, Data};
@@ -198,8 +200,7 @@ notify_room(Data) ->
             ok;
         _ ->
             lists:foreach(fun({K, V}) ->
-                                  hordad_rooms:send(?LCF_ROOM,
-                                                    {lcf, set, K, V})
+                                  hordad_rooms:send(?ROOM, {?ROOM, set, K, V})
                           end, Data),
             ok
     end.

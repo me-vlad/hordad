@@ -10,7 +10,4 @@
 -ifndef(ROOMS_HRL).
 -define(ROOMS_HRL, true).
 
--define(SYS_ROOM, sys).
--define(LCF_ROOM, lcf).
-
 -endif.

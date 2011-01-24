@@ -19,8 +19,10 @@
 -include_lib("hordad_aes_agent/include/hordad_aes_agent.hrl").
 
 -define(SERVICE_TAG, "aes_poller").
+-define(ROOM, ?MODULE).
 
 start_link() ->
+    hordad_room:create(?ROOM),
     hordad_service:start_link(?MODULE, ?MODULE, ?SERVICE_TAG).
 
 service_handler({"poll", Ref}, _Socket) ->

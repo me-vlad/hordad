@@ -54,7 +54,7 @@ start_link() ->
 
 %% @doc Create new room
 -spec(create(atom()) -> ok | {error, already_exists} | {error, unknown}).
-              
+
 create(Room) ->
     gen_server:call(?SERVER, {create, Room}).
 
@@ -120,10 +120,6 @@ init([]) ->
     {ok, Rooms} = hordad_ldb:match(#rooms{room='_', members='_'}),
 
     Refs = setup_monitor(Rooms, dict:new()),
-
-    lists:foreach(fun(X) ->
-                         create_room(?TABLE, X)
-                  end, hordad_lcf:get_var({?MODULE, rooms}, [])),
 
     {ok, #state{table=?TABLE, refs=Refs}}.
 
