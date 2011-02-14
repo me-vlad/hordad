@@ -34,10 +34,11 @@
          peername/1
         ]).
 
+-include_lib("hordad_lib/include/lib_types.hrl").
+
 -define(HEADER_SIZE, 32).
 -define(MAX_MESSAGE_SIZE, 65536).
 
--type(ip_address() :: {integer(), integer(), integer(), integer()}).
 -type(address() :: string() | ip_address()).
 
 %% @doc Get current protocol version

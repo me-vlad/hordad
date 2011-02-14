@@ -121,6 +121,10 @@ init([]) ->
 
     Refs = setup_monitor(Rooms, dict:new()),
 
+    lists:foreach(fun(X) ->
+                          create_room(?TABLE, X)
+                  end, hordad_lcf:get_var({?MODULE, rooms}, [])),
+
     {ok, #state{table=?TABLE, refs=Refs}}.
 
 %%--------------------------------------------------------------------

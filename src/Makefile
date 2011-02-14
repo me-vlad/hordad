@@ -10,7 +10,7 @@
 
 export ERL_LIBS=$(shell pwd):$(shell pwd)/../lib
 
-START_TESTS = ./start-tests.sh
+START_TESTS = ./start-tests.py
 APPS := $(wildcard hordad_*) contrib
 REL_FILE := hordad.rel
 
@@ -32,7 +32,7 @@ typecheck: $(APPS) boot
 
 tests: $(APPS) boot
 	@for app in $(APPS); do \
-		$(START_TESTS) $$app; \
+		$(START_TESTS) $$app || exit 1; \
 	done
 
 $(APPS):

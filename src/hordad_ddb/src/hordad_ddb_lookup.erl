@@ -286,7 +286,7 @@ handle_info({'DOWN', Ref, process, Pid, Info},
 
     {noreply, NewState};
 handle_info(Msg, State) ->
-    hordad_log:warning(?MODULE, "Unknown message received: ~9999p", [Msg]),
+    hordad_log:warning(?MODULE, "Unknown message received: ~p", [Msg]),
 
     {noreply, State}.
 

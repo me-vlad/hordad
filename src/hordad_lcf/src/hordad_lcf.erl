@@ -94,8 +94,6 @@ set_var(Var, Val) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    hordad_rooms:create(?ROOM),
-
     case load_config() of
         {ok, Data} ->
             {ok, Data};

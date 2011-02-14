@@ -4,7 +4,6 @@
 %%% Description: Application-level supervisor
 %%%
 %%% Created : 2010-06-30 by Max E. Kuznecov <mek@mek.uz.ua>
-%%% @copyright 2009-2010 Server Labs
 %%% -------------------------------------------------------------------
 
 -module(hordad_master).

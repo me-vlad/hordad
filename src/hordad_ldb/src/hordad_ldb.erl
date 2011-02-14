@@ -15,6 +15,7 @@
          table_exists/1,
          create_table/2,
          write/1,
+         delete/1,
          delete/2,
          read/2,
          read/3,
@@ -72,7 +73,7 @@ start_db() ->
                           ok = create_table(Table, Attrs)
                   end
           end,
-          [X:get_ldb_tables() || X <- Tables]),
+          lists:flatten([X:get_ldb_tables() || X <- Tables])),
 
         ok
     catch
@@ -80,17 +81,32 @@ start_db() ->
             {error, E}
     end.
 
-%% @doc Write record to database
+%% @doc Write single record or list of records as a single transaction
 -spec(write(tuple()) -> ok | {error, any()}).
-             
-write(Record) ->
-    run_transaction(fun() ->
-                            mnesia:write(Record)
-                    end).
 
-%% @doc Delete record from database
--spec(delete(atom(), any()) -> ok | {error, any()}).
+write(Records) when is_list(Records) ->
+    run_transaction(fun() ->
+                            lists:foreach(fun(Record) ->
+                                                  ok = mnesia:write(Record)
+                                          end, Records)
+                    end);
+write(Record) ->
+    write([Record]).
+
+%% @doc Delete records from database
+-spec(delete([{atom(), any()}]) -> ok | {error, any()}).
              
+delete(Keys) when is_list(Keys) ->
+    run_transaction(
+      fun() ->
+              lists:foreach(fun({Table, Key}) ->
+                                    mnesia:delete({Table, Key})
+                            end, Keys)
+      
+      end).
+
+%% @doc Delete records from table
+-spec(delete(atom(), any()) -> ok | {error, any()}).
 delete(Table, Key) ->
     run_transaction(fun() ->
                             mnesia:delete({Table, Key})
@@ -139,7 +155,7 @@ match(Pattern) ->
                     end).
 
 %% @doc Get list of all keys in table
--spec(all_keys(atom()) -> {ok, [atom()]} | {error, any()}).
+-spec(all_keys(atom()) -> {ok, [any()]} | {error, any()}).
 
 all_keys(Table) ->
     run_transaction(fun() ->

@@ -28,20 +28,12 @@
 %% top supervisor of the tree.
 %%--------------------------------------------------------------------
 start(_Type, _Args) ->
-
     ok = case init:get_argument(tests) of
              error ->
                  ok;
              {ok, Tests} ->
-                 try
-                    run_tests(lists:foldl(
-                                fun(X, Acc) ->
-                                        X ++ Acc
-                                end, [], Tests))
-                 catch
-                     _:_ ->
-                         ok
-                 end
+                 run_tests(lists:foldl(
+                             fun(X, Acc) -> X ++ Acc end, [], Tests))
          end,
 
     halt().
@@ -59,6 +51,14 @@ run_tests([]) ->
     ok;
 run_tests([Test | Tail]) ->
     io:format("~n>>>>>>>>>>>>>>>>>>> Running ~s:test()~n", [Test]),
-    apply(list_to_atom(Test), test, []),
+
+    try
+        ok = apply(list_to_atom(Test), test, [])
+    catch
+        _:E ->
+            io:format("***Error: ~p (~p)~n", [E, erlang:get_stacktrace()]),
+
+            halt(1)
+    end,
 
     run_tests(Tail).
