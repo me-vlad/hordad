@@ -14,7 +14,8 @@
 -export([start_link/0,
          status/0,
          status/1,
-         add_nodes/1
+         add_nodes/1,
+         remove_nodes/1
         ]).
 
 %% gen_server callbacks
@@ -37,6 +38,10 @@
           timestamp
          }).
 
+-record(state, {
+          worker,
+          table
+          }).
 %%====================================================================
 %% API
 %%====================================================================
@@ -47,12 +52,18 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-%% @doc Add nodes to monitor
+%% @doc Add nodes to monitoring
 -spec(add_nodes([net_node()]) -> ok | {error, any()}).
 
 add_nodes(Nodes) ->
     gen_server:call(?SERVER, {add_nodes, Nodes}).
 
+%% @doc Remove nodes from monitoring
+-spec(remove_nodes([net_node()]) -> ok | {error, any()}).
+
+remove_nodes(Nodes) ->
+    gen_server:call(?SERVER, {remove_nodes, Nodes}).
+    
 %% @doc Get all nodes status
 -spec(status() -> [{net_node(), atom()}]).
 
@@ -86,9 +97,9 @@ init([]) ->
     do_add_nodes(?TABLE, hordad_lcf:get_var({?MODULE, nodes}, [])),
     ok = hordad_rooms:create(?ROOM),
 
-    spawn(fun() -> worker(?TABLE) end),
 
-    {ok, ?TABLE}.
+    {ok, #state{table=?TABLE,
+                worker=init_worker(?TABLE)}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -100,11 +111,13 @@ init([]) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 handle_call(status, _From, State) ->
-    {reply, get_status(State), State};
+    {reply, get_status(State#state.table), State};
 handle_call({status, Node}, _From, State) ->
-    {reply, get_status(State, Node), State};
+    {reply, get_status(State#state.table, Node), State};
 handle_call({add_nodes, Nodes}, _From, State) ->
-    {reply, do_add_nodes(State, Nodes), State}.
+    {reply, do_add_nodes(State#state.table, Nodes), State};
+handle_call({remove_nodes, Nodes}, _From, State) ->
+    {reply, do_remove_nodes(State#state.table, Nodes), State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -121,6 +134,12 @@ handle_cast(_Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
+handle_info({'DOWN', Ref, process, Pid, Info},
+            #state{worker={Pid, Ref}}=State) ->
+    hordad_log:warning(?MODULE, "Worker process died: ~p."
+                       "Restarting", [Info]),
+
+    {noreply, State#state{worker=init_worker(State#state.table)}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -145,13 +164,18 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%--------------------------------------------------------------------
 
-%% @spec Add nodes to monitor. If some nodes already in table, ignore them
+%% @doc Add nodes to monitor. If some nodes already in table, ignore them
 -spec(do_add_nodes(atom(), [net_node()]) -> ok | {error, any()}).
 
 do_add_nodes(Tab, Nodes) ->
-    hordad_ldb:add_unless_exist([#aes_ag{node=Node,
+    hordad_ldb:add_unless_exist(Tab,
+                                [#aes_ag{node=Node,
                                          status=down,
                                          timestamp=now()} || Node <- Nodes]).
+
+%% @doc Workhouse for remove_nodes/1
+do_remove_nodes(Table, Nodes) ->
+    hordad_ldb:delete([{Table, Node} || Node <- Nodes]).
 
 %% @doc Worker loop.
 %%      Periodically poll all defined pollers
@@ -272,7 +296,7 @@ process_data(Data, Table) ->
     F = 
         fun({Node, NewStatus}) ->
                 case hordad_ldb:read(Table, Node) of
-                    [#aes_ag{status=OldStatus}=OldEntry] ->
+                    {ok, [#aes_ag{status=OldStatus}=OldEntry]} ->
                         NewEntry =
                             if
                                 %% Changed
@@ -287,7 +311,7 @@ process_data(Data, Table) ->
 
                         hordad_ldb:write(NewEntry#aes_ag{timestamp=now()});
                     %% New entry
-                    [] ->
+                    {ok, []} ->
                         hordad_ldb:write(#aes_ag{node=Node, status=NewStatus,
                                                  timestamp=now()})
                 end
@@ -308,10 +332,12 @@ status_handler(Node, Old, New) ->
 
 %% @doc Get all nodes status. Workhouse for status/0
 get_status(Table) ->
-    hordad_ldb:foldl(
-      fun(#aes_ag{node=Node, status=Status}, Acc) ->
-              [{Node, Status} | Acc]
-      end, [], Table).
+    {ok, Data} = hordad_ldb:foldl(
+                   fun(#aes_ag{node=Node, status=Status}, Acc) ->
+                           [{Node, Status} | Acc]
+                   end, [], Table),
+    
+    Data.
 
 %% @doc Get status of requested node. Workhouse for status/1
 get_status(Table, Node) ->
@@ -322,3 +348,5 @@ get_status(Table, Node) ->
             Status
     end.
 
+init_worker(Table) ->
+    spawn_monitor(fun() -> worker(Table) end).

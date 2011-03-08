@@ -23,7 +23,8 @@
          all_keys/1,
          foldl/3,
          first/1,
-         last/1
+         last/1,
+         add_unless_exist/2
         ]).
 
 -define(DEFAULT_OVERRIDE, false).
@@ -187,6 +188,22 @@ last(Table) ->
     run_transaction(fun() ->
                             mnesia:last(Table)
                     end).
+
+%% @doc Insert entries to table unless they're already added
+add_unless_exist(Table, Records) ->
+    run_transaction(
+      fun() ->
+              Keys = mnesia:all_keys(Table),
+
+              lists:foreach(fun(Record) ->
+                                    case lists:member(Record, Keys) of
+                                        true ->
+                                            ok;
+                                        false ->
+                                            ok = mnesia:write(Record)
+                                    end
+                            end, Records)
+      end).
 
 %%--------------------------------------------------------------------
 %%% Internal functions

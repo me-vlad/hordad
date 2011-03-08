@@ -28,4 +28,6 @@ if not TESTS:
     sys.exit(0)
 else:
     cmd = './start.sh -sasl errlog_type error -hordad_lcf conf \\"%s\\" -tests %s' % (CONF, " ".join(TESTS))
-    os.system(cmd)
+    res = os.system(cmd)
+
+    sys.exit(0 if res == 0 else 1)

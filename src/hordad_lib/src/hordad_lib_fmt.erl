@@ -17,4 +17,4 @@
 -spec(fmt_node(net_node()) -> string()).
               
 fmt_node({IP, Port}) ->
-    lists:flatten(io_lib:format("~s:~p", [hordad_lib:ip2str(IP), Port])).
+    lists:flatten(io_lib:format("~s:~p", [hordad_lib_net:ip2str(IP), Port])).
