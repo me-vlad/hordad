@@ -19,18 +19,16 @@
 -include_lib("hordad_aes_agent/include/hordad_aes_agent.hrl").
 
 -define(SERVICE_TAG, "aes_agent").
+-define(STATUS, up).
 
 start_link() ->
     hordad_service:start_link(?MODULE, ?MODULE, ?SERVICE_TAG).
 
 service_handler("status", _Socket) ->
-    available;
+    ?STATUS;
 
 service_handler("lar", _Socket) ->
-    calculate_lar();
-
-service_handler("report", _Socket) ->
-    #agent_report{status=available, lar=calculate_lar()}.
+    calculate_lar().
 
 %------------------
 % Internal functons

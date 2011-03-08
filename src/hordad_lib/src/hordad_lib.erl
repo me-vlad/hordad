@@ -4,7 +4,6 @@
 %%% Description: Hordad library module
 %%%
 %%% Created : 2010-01-04 by Max E. Kuznecov <mek@mek.uz.ua>
-%%% @copyright 2009-2010 Server Labs
 %%% -------------------------------------------------------------------
 
 -module(hordad_lib).

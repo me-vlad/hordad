@@ -9,11 +9,4 @@
 -ifndef(HORDAD_AES_AGENT_HRL).
 -define(HORDAD_AES_AGENT_HRL, true).
 
-%% Report record definition
--record(agent_report, {
-          status=down,   % Node status
-          lar=0          % Node LAR
-          }
-       ).
-
 -endif.

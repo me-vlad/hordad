@@ -185,6 +185,7 @@ init([]) ->
     hordad_registrar:register(?SERVICE_TAG,
                               {hordad_service, generic_service_handler,
                                [?MODULE, service_handler, []]}),
+    ok = hordad_rooms:join(hordad_aes_poller, self()),
 
     [IP, Port] = hordad_lcf:get_vars([{hordad, bind_ip}, {hordad, bind_port}]),
     Self = hordad_ddb_lib:make_node(IP, Port),
@@ -602,4 +603,3 @@ notify_successor(Succ, Self) ->
         {ok, ok} ->
             ok
     end.
-

@@ -14,8 +14,7 @@
 -export([start_link/0,
          status/0,
          status/1,
-         lar/1,
-         report/1
+         add_nodes/1
         ]).
 
 %% gen_server callbacks
@@ -24,16 +23,18 @@
 
 -export([get_ldb_tables/0]).
 
--include_lib("hordad_aes_agent/include/hordad_aes_agent.hrl").
+-include_lib("hordad_lib/include/lib_types.hrl").
 
 -define(SERVER, ?MODULE).
--define(DEFAULT_CYCLE_PERIOD, 60000).
 -define(TABLE, aes_ag).
+-define(ROOM, ?MODULE).
+
+-type(status() :: up | down).
 
 -record(aes_ag, {
-          node,       % Node IP
-          report,     % Node report (#agent_report)
-          status      % Node calculated status
+          node,       % Node
+          status,     % Node calculated status
+          timestamp
          }).
 
 %%====================================================================
@@ -46,29 +47,23 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
+%% @doc Add nodes to monitor
+-spec(add_nodes([net_node()]) -> ok | {error, any()}).
+
+add_nodes(Nodes) ->
+    gen_server:call(?SERVER, {add_nodes, Nodes}).
+
 %% @doc Get all nodes status
--spec(status() -> [{tuple(), atom(), #agent_report{}}]).
+-spec(status() -> [{net_node(), atom()}]).
 
 status() ->
     gen_server:call(?SERVER, status).
 
 %% @doc Get status of requested node
--spec(status(tuple()) -> available | down | undefined).
+-spec(status(net_node()) -> status() | undefined).
 
-status(IP) ->
-    gen_server:call(?SERVER, {status, IP}).
-
-%% @doc Get LAR value of requested node
--spec(lar(tuple()) -> integer()).
-
-lar(IP) ->
-    gen_server:call(?SERVER, {lar, IP}).
-
-%% @doc Get latest poller report for requested node
--spec(report(tuple()) -> #agent_report{}).
-
-report(IP) ->
-    gen_server:call(?SERVER, {report, IP}).
+status(Node) ->
+    gen_server:call(?SERVER, {status, Node}).
 
 %% @doc hordad_ldb table info callback.
 -spec(get_ldb_tables() -> {Name :: atom(), Attrs :: [{atom(), any()}]}).
@@ -88,6 +83,9 @@ get_ldb_tables() ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
+    do_add_nodes(?TABLE, hordad_lcf:get_var({?MODULE, nodes}, [])),
+    ok = hordad_rooms:create(?ROOM),
+
     spawn(fun() -> worker(?TABLE) end),
 
     {ok, ?TABLE}.
@@ -103,12 +101,10 @@ init([]) ->
 %%--------------------------------------------------------------------
 handle_call(status, _From, State) ->
     {reply, get_status(State), State};
-handle_call({status, IP}, _From, State) ->
-    {reply, get_status(State, IP), State};
-handle_call({lar, IP}, _From, State) ->
-    {reply, get_lar(State, IP), State};
-handle_call({report, IP}, _From, State) ->
-    {reply, get_report(State, IP), State}.
+handle_call({status, Node}, _From, State) ->
+    {reply, get_status(State, Node), State};
+handle_call({add_nodes, Nodes}, _From, State) ->
+    {reply, do_add_nodes(State, Nodes), State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -149,89 +145,93 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%--------------------------------------------------------------------
 
+%% @spec Add nodes to monitor. If some nodes already in table, ignore them
+-spec(do_add_nodes(atom(), [net_node()]) -> ok | {error, any()}).
+
+do_add_nodes(Tab, Nodes) ->
+    hordad_ldb:add_unless_exist([#aes_ag{node=Node,
+                                         status=down,
+                                         timestamp=now()} || Node <- Nodes]).
+
 %% @doc Worker loop.
 %%      Periodically poll all defined pollers
 %% @end
 
 worker(Table) ->
-    Period = hordad_lcf:get_var({?MODULE, cycle_period},
-                                ?DEFAULT_CYCLE_PERIOD),
+    [Period, Pollers, Nodes] = hordad_lcf:get_vars([{?MODULE, cycle_period},
+                                                    {?MODULE, pollers},
+                                                    {?MODULE, nodes}]),
 
     timer:sleep(Period),
 
-    aggregate(hordad_lcf:get_var({?MODULE, pollers}, []), Table),
+    aggregate(Nodes, Pollers, Table),
+
     worker(Table).
 
 %% @doc Poll every poller node provided and make a decision about
 %%      node status
 %% @end
--type(ip() :: {integer(), integer(), integer(), integer()}).
--spec(aggregate([{ip(), integer()}], atom()) -> ok).
+-spec(aggregate([net_node()], [net_node()], atom()) -> ok).
 
-aggregate(Pollers, Table) ->
-    Dict = lists:foldl(
-             fun(Node, Acc) ->
-                     Ref = make_ref(),
-                     Parent = self(),
+aggregate(Nodes, Pollers, Table) ->
+    Parent = self(),
+    Data = [spawn(fun() -> poll(P, Nodes, Parent) end) || P <- Pollers],
 
-                     dict:store(Node,
-                       {Ref, spawn(fun() ->
-                                           poll(Node, Ref, Parent)
-                                   end)}, Acc)
-             end, dict:new(), Pollers),
-
-    case wait_for_reports(Pollers, Dict) of
+    case wait_for_reports(Data, []) of
         timeout ->
             hordad_log:warning(?MODULE, "Poller session timeout", []),
             ok;
         RawData ->
-            AnalyzedData = analyze(dict:to_list(RawData)),
-            process_data(AnalyzedData, Table),
+            process_data(analyze(RawData), Table),
             ok
     end.
 
 %% @doc Request poller to init polling procedure and send parent the result
-%%      Parent receives message: {reference(), ip(), pid(), error | any()}
--spec(poll({ip(), integer()}, reference(), pid()) -> ok).
+%%      Parent receives message: {net_node(), pid(), error | any()}
+-spec(poll(net_node(), [net_node()], pid()) -> ok).
 
-poll({IP, Port}=Poller, Ref, Parent) ->
-    hordad_log:info(?MODULE, "Initiating polling session with ~p", [Poller]),
+poll({IP, Port}=Poller, Nodes, Parent) ->
+    hordad_log:info(?MODULE, "Initiating polling session with ~s",
+                    [hordad_lib_fmt:fmt_node(Poller)]),
 
     try
-        {ok, {ok, Ref, Report}} =
-          hordad_lib_net:gen_session(IP, Port, "aes_poller", {"poll", Ref}),
+        {ok, Report} =
+          hordad_lib_net:gen_session(IP, Port, "aes_poller", {"poll", Nodes}),
 
-        Parent ! {Ref, Poller, self(), Report}
+        Parent ! {Poller, self(), Report}
     catch
         _:E ->
-            hordad_log:warning(?MODULE, "Error polling ~p: ~9999p (~9999p)~n",
-                               [Poller, E, erlang:get_stacktrace()]),
+            hordad_log:warning(?MODULE, "Error polling ~s: ~p (~p)~n",
+                               [hordad_lib_fmt:fmt_node(Poller), E,
+                                erlang:get_stacktrace()]),
 
-            Parent ! {Ref, Poller, self(), error}
+            Parent ! {Poller, self(), error}
     end,
-    
+
     ok.
 
 %% @doc Wait for every poller session completes
--spec(wait_for_reports([{ip(), integer()}], dict()) -> dict() | timeout).
+-spec(wait_for_reports([pid()], list()) -> list() | timeout).
 
-wait_for_reports([], Dict) ->
-    Dict;
-wait_for_reports(Pollers, Dict) ->
+wait_for_reports([], Acc) ->
+    Acc;
+wait_for_reports(Data, Acc) ->
     SessionTimeout = hordad_lcf:get_var({?MODULE, session_timeout}),
 
     receive
-        {Ref, Poller, Pid, Report} ->
-            %% Ensure we've got poller in pending list
-            case dict:find(Poller, Dict) of
-                {ok, {Ref, Pid}} ->
-                    wait_for_reports(Pollers -- [Poller],
-                                     dict:store(Poller, Report, Dict));
+        {Poller, Pid, Report} ->
+            %% Ensure we've got pid in pending list
+            case lists:member(Pid, Data) of
+                true ->
+                    wait_for_reports(Data -- [Pid],
+                                     hordad_lib:setv(Poller, Report, Acc));
                 _ ->
                     hordad_log:warning(?MODULE,
-                                       "Got unexpected poller report from ~p:"
-                                       "~9999p", [Poller, Report]),
-                    wait_for_reports(Pollers, Dict)
+                                       "Got unexpected poller report from ~s:"
+                                       "~p", [hordad_lib_fmt:fmt_node(Poller),
+                                              Report]),
+
+                    wait_for_reports(Data, Acc)
             end
     after
         SessionTimeout ->
@@ -239,28 +239,23 @@ wait_for_reports(Pollers, Dict) ->
     end.
 
 %% @doc Analyze collected pollers data and return aggregated result
--spec(analyze(list()) -> list()).
+-spec(analyze([{net_node(), status()}]) -> list()).
 
 analyze(Data) ->
-    FReport = fun({Node, Report}, Acc) ->
-                      Current = hordad_lib:getv(Node, Acc, #agent_report{}),
+    FReport = fun({Node, Status}, Acc) ->
+                      Current = hordad_lib:getv(Node, Acc, down),
 
                       New = if
-                                Report#agent_report.status == available ->
-                                    Report;
-                                Current#agent_report.status == available ->
-                                    Current;
+                                Status == up orelse Current == up ->
+                                    up;
                                 true ->
-                                    Report
+                                    Status
                             end,
 
                       hordad_lib:setv(Node, New, Acc)
               end,
 
-    FPoller = fun({Poller, error}, Acc) ->
-                      hordad_log:warning(?MODULE,
-                                         "Skipping erroneus report for "
-                                         "poller ~9999p", [Poller]),
+    FPoller = fun({_, error}, Acc) ->
                       Acc;
                  ({_Poller, Report}, Acc) ->
                       lists:foldl(FReport, Acc, Report)
@@ -274,80 +269,48 @@ analyze(Data) ->
 -spec(process_data(list(), atom()) -> ok).
 
 process_data(Data, Table) ->
-    F = fun({Node, Report}, Acc) ->
-                NewStatus = calc_status(Node, Report),
-
+    F = 
+        fun({Node, NewStatus}) ->
                 case hordad_ldb:read(Table, Node) of
                     [#aes_ag{status=OldStatus}=OldEntry] ->
-                        {NewAcc, NewEntry} =
+                        NewEntry =
                             if
-                                % Changed
+                                %% Changed
                                 NewStatus =/= OldStatus ->
                                     status_handler(Node, OldStatus, NewStatus),
 
-                                    {[Node | Acc],
-                                     OldEntry#aes_ag{status=NewStatus,
-                                                     report=Report}};
-                                % Status not changed, just update report
+                                    OldEntry#aes_ag{status=NewStatus};
+                                %% Status not changed, just update ts
                                 true ->
-                                    {Acc, OldEntry#aes_ag{report=Report}}
+                                    OldEntry
                             end,
 
-                        hordad_ldb:write(NewEntry),
-
-                        NewAcc;
+                        hordad_ldb:write(NewEntry#aes_ag{timestamp=now()});
                     %% New entry
                     [] ->
                         hordad_ldb:write(#aes_ag{node=Node, status=NewStatus,
-                                                 report=Report}),
-                        Acc;
-                    %% No change
-                    _ ->
-                        Acc
+                                                 timestamp=now()})
                 end
         end,
 
-    Acc = lists:foldl(F, [], Data),
-
-    %% Check if there were pending nodes
-    Affected = case get(pending) of
-                   undefined ->
-                       Acc;
-                   Pending ->
-                       lists:usort(Pending ++ Acc)
-               end,
-
-    %% Ensure GTS has successfully processed data,
-    %% otherwise put it into pending list and try next time
-    try
-        ok = hordad_gts:process_data(Affected),
-        erase(pending)
-    catch
-        _:E ->
-            hordad_log:error(?MODULE, "Error processing data, "
-                             "saving for the next interation: ~9999p", [E]),
-            put(pending, Affected)
-    end.
+    lists:foreach(F, Data).
 
 %% @doc Handle changes in node status
 
--spec(status_handler(ip(), Old :: atom(), New :: atom()) -> atom()).
+-spec(status_handler(net_node(), Old :: status(), New :: status()) -> ok).
 
-status_handler(Node, available, down) ->
-    hordad_log:info(?MODULE,
-                    "Node ~p status changed available -> down", [Node]);
-status_handler(Node, down, available) ->
-    hordad_log:info(?MODULE,
-                    "Node ~p status changed down -> available", [Node]);
 status_handler(Node, Old, New) ->
-    hordad_log:warning(?MODULE, "Unexpected node ~p state change: "
-                       "~9999p -> ~9999p", [Node, Old, New]).
+    hordad_rooms:send(?ROOM, {?MODULE, status, Node, Old, New, now()}),
+
+    hordad_log:info(?MODULE,
+                    "Node ~s status changed ~p -> ~p",
+                    [hordad_lib_fmt:fmt_node(Node), Old, New]).
 
 %% @doc Get all nodes status. Workhouse for status/0
 get_status(Table) ->
     hordad_ldb:foldl(
-      fun(#aes_ag{node=Node, status=Status, report=Report}, Acc) ->
-              [{Node, Status, Report} | Acc]
+      fun(#aes_ag{node=Node, status=Status}, Acc) ->
+              [{Node, Status} | Acc]
       end, [], Table).
 
 %% @doc Get status of requested node. Workhouse for status/1
@@ -359,40 +322,3 @@ get_status(Table, Node) ->
             Status
     end.
 
-%% @doc Get LAR of requested node. Workhouse for lar/1
-get_lar(Table, Node) ->
-    case get_report(Table, Node) of
-        undefined ->
-            undefined;
-        #agent_report{lar=LAR} ->
-            LAR
-    end.
-
-%% @doc Get report of requested node. Workhouse for report/1
-get_report(Table, Node) ->
-    case hordad_ldb:read(Table, Node) of
-        {ok, []} ->
-            undefined;
-        {ok, [#aes_ag{report=Report}]} ->
-            Report
-    end.
-
-%% @doc Calculate overall node status, including availability status
-%% and LAR value
-%% @end
--spec(calc_status(ip(), #agent_report{}) -> down | available).
-
-calc_status(Node, NewReport) ->
-    NodeMaxLar = hordad_gts_lib:get_max_lar(Node),
-
-    if
-        %% Node availability status down
-        NewReport#agent_report.status =:= down ->
-            down;
-        % LAR exceeded threshold
-        NewReport#agent_report.lar > NodeMaxLar ->
-            down;
-        % Else node is available
-        true ->
-            available
-    end.

@@ -51,3 +51,24 @@ add_remove_nodes_test_() ->
              ?assertEqual(ok, hordad_aes_poller:clear_nodes(Tag)),
              ?assertEqual([], hordad_aes_poller:get_nodes(Tag))
      end}.
+
+room_msg_test_() ->
+    {timeout, 60,
+     fun() ->
+             Tag = "room",
+             Node1 = {{127,0,0,1}, 6699},
+
+             % Clear all nodes in poller first
+             lists:foreach(fun(T) ->
+                                   ok = hordad_aes_poller:clear_nodes(T)
+                           end, hordad_aes_poller:get_tags()),
+
+             ok = hordad_rooms:join(hordad_aes_poller, self()),
+             ok = hordad_aes_poller:add_nodes(Tag, [Node1]),
+             ok = receive
+                      {hordad_aes_poller, status, Node1, _, available, _} ->
+                          ok
+                  after 10000 ->
+                          timeout
+                  end
+     end}.

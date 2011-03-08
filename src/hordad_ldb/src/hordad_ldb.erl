@@ -77,8 +77,8 @@ start_db() ->
 
         ok
     catch
-        _:E ->
-            {error, E}
+        _:_ ->
+            {error, erlang:get_stacktrace()}
     end.
 
 %% @doc Write single record or list of records as a single transaction

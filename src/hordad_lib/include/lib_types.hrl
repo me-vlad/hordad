@@ -12,5 +12,7 @@
 -type(ipv4() :: {integer(), integer(), integer(), integer()}).
 -type(ipv6() :: undefined).
 -type(ip_address() :: ipv4() | ipv6()).
+-type(net_port() :: integer()).
+-type(net_node() :: {ip_address(), net_port()}).
 
 -endif.
