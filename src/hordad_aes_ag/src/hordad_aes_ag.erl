@@ -63,7 +63,7 @@ add_nodes(Nodes) ->
 
 remove_nodes(Nodes) ->
     gen_server:call(?SERVER, {remove_nodes, Nodes}).
-    
+
 %% @doc Get all nodes status
 -spec(status() -> [{net_node(), atom()}]).
 
@@ -293,7 +293,7 @@ analyze(Data) ->
 -spec(process_data(list(), atom()) -> ok).
 
 process_data(Data, Table) ->
-    F = 
+    F =
         fun({Node, NewStatus}) ->
                 case hordad_ldb:read(Table, Node) of
                     {ok, [#aes_ag{status=OldStatus}=OldEntry]} ->
@@ -336,7 +336,7 @@ get_status(Table) ->
                    fun(#aes_ag{node=Node, status=Status}, Acc) ->
                            [{Node, Status} | Acc]
                    end, [], Table),
-    
+
     Data.
 
 %% @doc Get status of requested node. Workhouse for status/1
