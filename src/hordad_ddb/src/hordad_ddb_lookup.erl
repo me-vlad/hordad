@@ -42,7 +42,6 @@
           successor_list,
           join,
           stabilizer,
-          predecessor_checker,
           finger_checker
          }).
 
@@ -185,7 +184,8 @@ init([]) ->
     hordad_registrar:register(?SERVICE_TAG,
                               {hordad_service, generic_service_handler,
                                [?MODULE, service_handler, []]}),
-    ok = hordad_rooms:join(hordad_aes_poller, self()),
+
+    ok = hordad_rooms:join(hordad_aes_ag, self()),
 
     [IP, Port] = hordad_lcf:get_vars([{hordad, bind_ip}, {hordad, bind_port}]),
     Self = hordad_ddb_lib:make_node(IP, Port),
@@ -198,7 +198,6 @@ init([]) ->
        join = init_join(Self),
        finger_table = init_finger_table(Self#node.id),
        stabilizer = init_stabilizer(),
-       predecessor_checker = init_predecessor_checker(),
        finger_checker = init_finger_checker()
       }
     }.
@@ -261,18 +260,14 @@ handle_info({'DOWN', Ref, process, Pid, Info},
                        [Info]),
 
     {noreply, State#state{stabilizer=init_stabilizer()}};
-handle_info({'DOWN', Ref, process, Pid, Info},
-            #state{predecessor_checker={Pid, Ref}}=State) ->
-    hordad_log:warning(?MODULE, "Predecessor checker process died: ~p."
-                       "Restarting", [Info]),
 
-    {noreply, State#state{predecessor_checker=init_predecessor_checker()}};
 handle_info({'DOWN', Ref, process, Pid, Info},
             #state{finger_checker={Pid, Ref}}=State) ->
     hordad_log:warning(?MODULE, "Finger checker process died: ~p."
                        "Restarting", [Info]),
 
     {noreply, State#state{finger_checker=init_finger_checker()}};
+
 handle_info({'DOWN', Ref, process, Pid, Info},
             #state{join={Pid, Ref}, self=Self}=State) ->
     NewState = case Info of
@@ -286,6 +281,22 @@ handle_info({'DOWN', Ref, process, Pid, Info},
                end,
 
     {noreply, NewState};
+
+handle_info({hordad_aes_ag, status, Node, _Old, New, _},
+            #state{predecessor=Pred}=State) ->
+    NewState =
+        if
+            %% Our predecessor is down
+            Node == Pred andalso New == down ->
+                hordad_log:info(?MODULE, "Predecessor is down", []),
+                State#state{predecessor=undefined};
+            %% Some other node changed state, ignore
+            true ->
+                State
+        end,
+
+    {noreply, NewState};
+
 handle_info(Msg, State) ->
     hordad_log:warning(?MODULE, "Unknown message received: ~p", [Msg]),
 
@@ -420,10 +431,6 @@ find_preceding_node(Id, SelfId, [{_, Node} | T], Def)
 find_preceding_node(Id, SelfId, [_ | T], Def) ->
     find_preceding_node(Id, SelfId, T, Def).
 
-%% @doc Init pred checker process
-init_predecessor_checker() ->
-    erlang:spawn_monitor(fun predecessor_checker/0).
-
 %% @doc Init stabilizer process
 init_stabilizer() ->
     erlang:spawn_monitor(fun stabilizer/0).
@@ -486,32 +493,6 @@ stabilizer() ->
     {ok, ok} = session(get_successor(), ?SERVICE_TAG, {"notify", Self}),
 
     stabilizer().
-
-%% @doc Predecessor checker function
-%% Run periodically to check if our predecessor has failed.
-
-predecessor_checker() ->
-    Interval = hordad_lcf:get_var({hordad_ddb, pred_checker_interval}),
-
-    timer:sleep(Interval),
-
-    case get_predecessor() of
-        undefined ->
-            ok;
-        Pred ->
-            %% TODO: Replace ad-hoc monitoring
-            case session(Pred, "aes_agent", "status") of
-                {ok, available} ->
-                    ok;
-                %% Assume failed
-                _ ->
-                    hordad_log:info(?MODULE, "Predecessor is down", []),
-
-                    set_predecessor(undefined)
-            end
-    end,
-
-    predecessor_checker().
 
 %% @doc Finger checker function
 %% Run periodically to repair finger table
