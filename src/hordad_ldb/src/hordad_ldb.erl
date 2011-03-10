@@ -15,16 +15,19 @@
          table_exists/1,
          create_table/2,
          write/1,
+         write_nt/1,
          delete/1,
          delete/2,
+         delete_nt/2,
          read/2,
          read/3,
+         read_nt/2,
          match/1,
          all_keys/1,
          foldl/3,
          first/1,
          last/1,
-         add_unless_exist/2
+         transaction/1
         ]).
 
 -define(DEFAULT_OVERRIDE, false).
@@ -82,6 +85,10 @@ start_db() ->
             {error, erlang:get_stacktrace()}
     end.
 
+%% @doc Write to be used in custom transactions
+write_nt(Record) ->
+    mnesia:write(Record).
+
 %% @doc Write single record or list of records as a single transaction
 -spec(write(tuple()) -> ok | {error, any()}).
 
@@ -96,22 +103,31 @@ write(Record) ->
 
 %% @doc Delete records from database
 -spec(delete([{atom(), any()}]) -> ok | {error, any()}).
-             
+
 delete(Keys) when is_list(Keys) ->
     run_transaction(
       fun() ->
               lists:foreach(fun({Table, Key}) ->
                                     mnesia:delete({Table, Key})
                             end, Keys)
-      
+
       end).
+
+%% @doc Delete to be used in custom transactions
+delete_nt(Table, Key) ->
+    mnesia:delete({Table, Key}).
 
 %% @doc Delete records from table
 -spec(delete(atom(), any()) -> ok | {error, any()}).
+
 delete(Table, Key) ->
     run_transaction(fun() ->
                             mnesia:delete({Table, Key})
                     end).
+
+%% @doc Read to be used in custom transactions
+read_nt(Table, Key) ->
+    mnesia:read({Table, Key}).
 
 %% @doc Get all records with provided key from database
 -spec(read(atom(), any()) -> {ok, [tuple()]} | {error, any()}).
@@ -189,21 +205,11 @@ last(Table) ->
                             mnesia:last(Table)
                     end).
 
-%% @doc Insert entries to table unless they're already added
-add_unless_exist(Table, Records) ->
-    run_transaction(
-      fun() ->
-              Keys = mnesia:all_keys(Table),
+%% @doc Run external function in transaction
+-spec(transaction(function()) -> {ok, any()} | {error, any()}).
 
-              lists:foreach(fun(Record) ->
-                                    case lists:member(Record, Keys) of
-                                        true ->
-                                            ok;
-                                        false ->
-                                            ok = mnesia:write(Record)
-                                    end
-                            end, Records)
-      end).
+transaction(Fun) ->
+    run_transaction(Fun).
 
 %%--------------------------------------------------------------------
 %%% Internal functions
@@ -227,4 +233,3 @@ get_db_dir() ->
             filename:join([hordad_lib:get_system_base(),
                            Relative])
     end.
-    

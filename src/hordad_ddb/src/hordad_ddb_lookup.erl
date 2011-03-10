@@ -214,7 +214,7 @@ init([]) ->
 handle_call({set_successor, Node}, _From, State) ->
     {reply, ok, do_set_successor(Node, State)};
 handle_call({set_predecessor, Node}, _From, State) ->
-    {reply, ok, State#state{predecessor=Node}};
+    {reply, ok, do_set_predecessor(Node, undefined, State)};
 handle_call(get_self, _From, #state{self=Self}=State) ->
     {reply, Self, State};
 handle_call(get_successor, _From, #state{successor=Succ}=State) ->
@@ -288,8 +288,9 @@ handle_info({hordad_aes_ag, status, Node, _Old, New, _},
         if
             %% Our predecessor is down
             Node == Pred andalso New == down ->
-                hordad_log:info(?MODULE, "Predecessor is down", []),
-                State#state{predecessor=undefined};
+                hordad_log:info(?MODULE, "Predecessor ~s is down",
+                                [hordad_lib_fmt:fmt_node(Pred)]),
+                do_set_predecessor(undefined, Pred, State);
             %% Some other node changed state, ignore
             true ->
                 State
@@ -537,11 +538,6 @@ session(#node{ip=IP, port=Port}, Tag, Service) ->
 -spec(do_notify(#node{}, #state{}) -> #state{}).
 
 do_notify(Node, #state{predecessor=Pred, self=Self}=State) ->
-    LogF = fun(#node{ip=IP, port=Port, id_str=Id}) ->
-                   hordad_log:info(?MODULE, "New predecessor: "
-                                   "~p:~p (~p)", [IP, Port, Id])
-           end,
-
     if
         %% Its ourselves, ignore.
         Node == Self ->
@@ -551,16 +547,14 @@ do_notify(Node, #state{predecessor=Pred, self=Self}=State) ->
             State;
         %% New node recently joined
         Pred == undefined ->
-            LogF(Node),
-            State#state{predecessor=Node};
+            do_set_predecessor(Node, undefined, State);
         true ->
             InRange = hordad_ddb_lib:between_right_inc(
                         Pred#node.id, Self#node.id, Node#node.id),
 
             if
                 InRange == true ->
-                    LogF(Node),
-                    State#state{predecessor=Node};
+                    do_set_predecessor(Node, undefined, State);
                 true ->
                     State
             end
@@ -584,3 +578,17 @@ notify_successor(Succ, Self) ->
         {ok, ok} ->
             ok
     end.
+
+do_set_predecessor(New, Old, State) ->
+    case New of
+        %% Remove rather than add.
+        undefined ->
+            hordad_aes_ag:remove_nodes([Old], ?MODULE);
+        #node{ip=IP, port=Port, id_str=Id} ->
+            hordad_log:info(?MODULE, "New predecessor: "
+                            "~p:~p (~p)", [IP, Port, Id]),
+
+            hordad_aes_ag:add_nodes([New], ?MODULE)
+    end,
+
+    State#state{predecessor=New}.

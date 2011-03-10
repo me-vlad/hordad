@@ -15,7 +15,9 @@
          status/0,
          status/1,
          add_nodes/1,
-         remove_nodes/1
+         add_nodes/2,
+         remove_nodes/1,
+         remove_nodes/2
         ]).
 
 %% gen_server callbacks
@@ -29,19 +31,22 @@
 -define(SERVER, ?MODULE).
 -define(TABLE, aes_ag).
 -define(ROOM, ?MODULE).
+-define(DEFAULT_OWNER, default).
 
 -type(status() :: up | down).
+-type(owner() :: atom()).
 
 -record(aes_ag, {
           node,       % Node
           status,     % Node calculated status
-          timestamp
+          owners      % List of node owners
          }).
 
 -record(state, {
           worker,
           table
           }).
+
 %%====================================================================
 %% API
 %%====================================================================
@@ -56,13 +61,25 @@ start_link() ->
 -spec(add_nodes([net_node()]) -> ok | {error, any()}).
 
 add_nodes(Nodes) ->
-    gen_server:call(?SERVER, {add_nodes, Nodes}).
+    add_nodes(Nodes, ?DEFAULT_OWNER).
+
+%% @doc Add nodes to monitoring with provided owner
+-spec(add_nodes([net_node()], owner()) -> ok | {error, any()}).
+
+add_nodes(Nodes, Owner) ->
+    gen_server:call(?SERVER, {add_nodes, Nodes, Owner}).
 
 %% @doc Remove nodes from monitoring
 -spec(remove_nodes([net_node()]) -> ok | {error, any()}).
 
 remove_nodes(Nodes) ->
-    gen_server:call(?SERVER, {remove_nodes, Nodes}).
+    remove_nodes(Nodes, ?DEFAULT_OWNER).
+
+%% @doc Remove nodes from monitoring with provided owner
+-spec(remove_nodes([net_node()], owner()) -> ok | {error, any()}).
+
+remove_nodes(Nodes, Owner) ->
+    gen_server:call(?SERVER, {remove_nodes, Nodes, Owner}).
 
 %% @doc Get all nodes status
 -spec(status() -> [{net_node(), atom()}]).
@@ -94,7 +111,8 @@ get_ldb_tables() ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    do_add_nodes(?TABLE, hordad_lcf:get_var({?MODULE, nodes}, [])),
+    do_add_nodes(?TABLE, hordad_lcf:get_var({?MODULE, nodes}, []),
+                 ?DEFAULT_OWNER),
     ok = hordad_rooms:create(?ROOM),
 
 
@@ -114,10 +132,12 @@ handle_call(status, _From, State) ->
     {reply, get_status(State#state.table), State};
 handle_call({status, Node}, _From, State) ->
     {reply, get_status(State#state.table, Node), State};
-handle_call({add_nodes, Nodes}, _From, State) ->
-    {reply, do_add_nodes(State#state.table, Nodes), State};
-handle_call({remove_nodes, Nodes}, _From, State) ->
-    {reply, do_remove_nodes(State#state.table, Nodes), State}.
+handle_call({add_nodes, Nodes, Owner}, _From, State) ->
+    {reply, do_add_nodes(State#state.table,
+                         lists:usort(Nodes), Owner), State};
+handle_call({remove_nodes, Nodes, Owner}, _From, State) ->
+    {reply, do_remove_nodes(State#state.table,
+                            lists:usort(Nodes), Owner), State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -164,18 +184,54 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%--------------------------------------------------------------------
 
-%% @doc Add nodes to monitor. If some nodes already in table, ignore them
--spec(do_add_nodes(atom(), [net_node()]) -> ok | {error, any()}).
+%% @doc Add nodes to monitor.
+%%      If some nodes already in table - update owners if needed
+-spec(do_add_nodes(atom(), [net_node()], owner()) -> ok | {error, any()}).
 
-do_add_nodes(Tab, Nodes) ->
-    hordad_ldb:add_unless_exist(Tab,
-                                [#aes_ag{node=Node,
-                                         status=down,
-                                         timestamp=now()} || Node <- Nodes]).
+do_add_nodes(Tab, Nodes, Owner) ->
+    F = fun() ->
+                lists:foreach(
+                  fun(Node) ->
+                          New =
+                              case hordad_ldb:read_nt(Tab, Node) of
+                                  [] ->
+                                      #aes_ag{node=Node,
+                                              status=down,
+                                              owners=[Owner]};
+                                  [#aes_ag{owners=Owners}=C] ->
+                                      C#aes_ag{owners=lists:usort(
+                                                        [Owner | Owners])}
+                              end,
+
+                          hordad_ldb:write_nt(New)
+                  end, Nodes)
+        end,
+
+    hordad_ldb:transaction(F).
 
 %% @doc Workhouse for remove_nodes/1
-do_remove_nodes(Table, Nodes) ->
-    hordad_ldb:delete([{Table, Node} || Node <- Nodes]).
+do_remove_nodes(Tab, Nodes, Owner) ->
+    F = fun() ->
+                lists:foreach(
+                  fun(Node) ->
+                          case hordad_ldb:read_nt(Tab, Node) of
+                              [] ->
+                                  ok;
+                              [#aes_ag{owners=Owners}=C] ->
+                                  case Owners -- [Owner] of
+                                      %% No more owners, delete entry
+                                      [] ->
+                                          hordad_ldb:delete_nt(Tab, Node);
+                                      %% Else remove just owner
+                                      NewOwners ->
+                                          hordad_ldb:write_nt(
+                                            C#aes_ag{owners=NewOwners})
+                                  end
+                          end
+                  end, Nodes)
+        end,
+
+    hordad_ldb:transaction(F).
 
 %% @doc Worker loop.
 %%      Periodically poll all defined pollers
@@ -297,23 +353,21 @@ process_data(Data, Table) ->
         fun({Node, NewStatus}) ->
                 case hordad_ldb:read(Table, Node) of
                     {ok, [#aes_ag{status=OldStatus}=OldEntry]} ->
-                        NewEntry =
-                            if
-                                %% Changed
-                                NewStatus =/= OldStatus ->
-                                    status_handler(Node, OldStatus, NewStatus),
+                        if
+                            %% Changed
+                            NewStatus =/= OldStatus ->
+                                status_handler(Node, OldStatus, NewStatus),
 
-                                    OldEntry#aes_ag{status=NewStatus};
-                                %% Status not changed, just update ts
-                                true ->
-                                    OldEntry
-                            end,
-
-                        hordad_ldb:write(NewEntry#aes_ag{timestamp=now()});
+                                hordad_ldb:write(
+                                  OldEntry#aes_ag{status=NewStatus});
+                            %% Status not changed, just update ts
+                            true ->
+                                ok
+                        end;
                     %% New entry
                     {ok, []} ->
                         hordad_ldb:write(#aes_ag{node=Node, status=NewStatus,
-                                                 timestamp=now()})
+                                                 owners=[?DEFAULT_OWNER]})
                 end
         end,
 
