@@ -166,6 +166,13 @@ post_start(Pid, LogFun) ->
 	    {ok, Pid};
 	{mysql_conn, Pid, {error, Reason}} ->
 	    {error, Reason};
+	{mysql_conn, OtherPid, {error, Reason}} ->
+	    % Ignore error message from other processes. This handles the case
+	    % when mysql is shutdown and takes more than 5 secs to close the
+	    % listener socket.
+	    ?Log2(LogFun, debug, "Ignoring message from process ~p | Reason: ~p",
+		  [OtherPid, Reason]),
+	    post_start(Pid, LogFun);
 	Unknown ->
 	    ?Log2(LogFun, error,
 		 "received unknown signal, exiting: ~p", [Unknown]),
@@ -624,9 +631,9 @@ greeting(Packet, LogFun) ->
     {normalize_version(Version, LogFun), Salt, Salt2, Caps}.
 
 %% part of greeting/2
-asciz(Data) when binary(Data) ->
+asciz(Data) when is_binary(Data) ->
     mysql:asciz_binary(Data, []);
-asciz(Data) when list(Data) ->
+asciz(Data) when is_list(Data) ->
     {String, [0 | Rest]} = lists:splitwith(fun (C) ->
 						   C /= 0
 					   end, Data),
@@ -648,12 +655,14 @@ asciz(Data) when list(Data) ->
 %%--------------------------------------------------------------------
 get_query_response(LogFun, RecvPid, Version) ->
     case do_recv(LogFun, RecvPid, undefined) of
-	{ok, <<Fieldcount:8, Rest/binary>>, _} ->
+	{ok, Packet, _} ->
+	    {Fieldcount, Rest} = get_lcb(Packet),
 	    case Fieldcount of
 		0 ->
 		    %% No Tabular data
-		    <<AffectedRows:8, _Rest2/binary>> = Rest,
-		    {updated, #mysql_result{affectedrows=AffectedRows}};
+		    {AffectedRows, Rest2} = get_lcb(Rest),
+		    {InsertId, _} = get_lcb(Rest2),
+		    {updated, #mysql_result{affectedrows=AffectedRows, insertid=InsertId}};
 		255 ->
 		    <<_Code:16/little, Message/binary>>  = Rest,
 		    {error, #mysql_result{error=Message}};
@@ -787,17 +796,27 @@ get_row([Field | OtherFields], Data, Res) ->
 	   end,
     get_row(OtherFields, Rest, [This | Res]).
 
-get_with_length(<<251:8, Rest/binary>>) ->
-    {null, Rest};
-get_with_length(<<252:8, Length:16/little, Rest/binary>>) ->
-    split_binary(Rest, Length);
-get_with_length(<<253:8, Length:24/little, Rest/binary>>) ->
-    split_binary(Rest, Length);
-get_with_length(<<254:8, Length:64/little, Rest/binary>>) ->
-    split_binary(Rest, Length);
-get_with_length(<<Length:8, Rest/binary>>) when Length < 251 ->
-    split_binary(Rest, Length).
+get_with_length(Bin) when is_binary(Bin) ->
+    {Length, Rest} = get_lcb(Bin),
+    case get_lcb(Bin) of 
+    	 {null, Rest} -> {null, Rest};
+    	 _ -> split_binary(Rest, Length)
+    end.
 
+
+
+get_lcb(<<251:8, Rest/binary>>) ->
+    {null, Rest};
+get_lcb(<<252:8, Value:16/little, Rest/binary>>) ->
+    {Value, Rest};
+get_lcb(<<253:8, Value:24/little, Rest/binary>>) ->
+    {Value, Rest};
+get_lcb(<<254:8, Value:32/little, Rest/binary>>) ->
+    {Value, Rest};
+get_lcb(<<Value:8, Rest/binary>>) when Value < 251 ->
+    {Value, Rest};
+get_lcb(<<255:8, Rest/binary>>) ->
+    {255, Rest}.
 
 %%--------------------------------------------------------------------
 %% Function: do_send(Sock, Packet, SeqNum, LogFun)
